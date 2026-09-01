@@ -1,0 +1,10 @@
+*.pem
+*.key
+.env
+*.env
+application.properties
+*.tfstate
+*.tfstate.backup
+.terraform/
+__pycache__/
+*.pyc
