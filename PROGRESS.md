@@ -41,6 +41,14 @@ Phase 2 — Backend EC2s (not started)
   * com.amazonaws.us-east-1.ssmmessages — vpce-00ae7b1e49d5deed5
   * com.amazonaws.us-east-1.ec2messages — vpce-01766d5b403a3b8f7
 
+### IAM Setup ✅
+- Created IAM role: vprofile-ssm-role
+  * Trust policy: ec2.amazonaws.com only
+  * Attached policy: AmazonSSMManagedInstanceCore
+- Created instance profile: vprofile-ssm-instance-profile
+  * vprofile-ssm-role added to instance profile
+  * Ready to attach to EC2 instances on launch
+
 ## Current State
 Phase 1 fully complete. No EC2s or ALB running — no billable resources active.
 SSM endpoints are Interface type and incur a small hourly charge (~$0.01/hr each,
@@ -62,6 +70,8 @@ vprofile-ssm-ep-sg: sg-05bfef82dda3ad55b
 ssm endpoint:       vpce-0615acc9dd367d915
 ssmmessages endpoint: vpce-00ae7b1e49d5deed5
 ec2messages endpoint: vpce-01766d5b403a3b8f7
+vprofile-ssm-role: arn:aws:iam::747336059892:role/vprofile-ssm-role
+vprofile-ssm-instance-profile: arn:aws:iam::747336059892:instance-profile/vprofile-ssm-instance-profile
 
 ## Key Decisions
 - Dedicated VPC over default VPC (network isolation, teaches fundamentals)
@@ -79,9 +89,9 @@ ec2messages endpoint: vpce-01766d5b403a3b8f7
   and user setup. Will complete in Phase 2.
 
 ## Next Step
-Phase 2 — Backend EC2s. Before launching instances, understand the
-IAM → SSM → EC2 relationship. Then launch MySQL, Memcache, and RabbitMQ
-instances in the private subnet using user-data scripts.
+Phase 2 — Launch backend EC2 instances (MySQL, Memcache, RabbitMQ) in
+private subnet with vprofile-ssm-instance-profile attached. Start with
+completing mysql.sh user-data script before launching any instances.
 
 ## Remaining Phases
 - Phase 2: Launch backend EC2s (MySQL, Memcache, RabbitMQ) in private subnet
