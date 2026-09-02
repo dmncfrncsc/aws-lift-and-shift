@@ -6,7 +6,7 @@ Replacing five local Vagrant VMs with equivalent AWS resources.
 
 ## Current Phase
 Phase 1 — Network & Security Foundation ✅ COMPLETE
-Phase 2 — Backend EC2s (not started)
+Phase 2 — Backend EC2s (in progress)
 
 ## Completed Work
 
@@ -41,7 +41,9 @@ Phase 2 — Backend EC2s (not started)
   * com.amazonaws.us-east-1.ssmmessages — vpce-00ae7b1e49d5deed5
   * com.amazonaws.us-east-1.ec2messages — vpce-01766d5b403a3b8f7
 
-### IAM Setup ✅
+### Phase 2 — Backend EC2s (in progress)
+
+#### IAM Setup ✅
 - Created IAM role: vprofile-ssm-role
   * Trust policy: ec2.amazonaws.com only
   * Attached policy: AmazonSSMManagedInstanceCore
@@ -49,10 +51,18 @@ Phase 2 — Backend EC2s (not started)
   * vprofile-ssm-role added to instance profile
   * Ready to attach to EC2 instances on launch
 
+#### mysql.sh (in progress)
+- Reviewed existing partial script — found typo: mariaddb105 → mariadb105
+- Reviewed both SQL files in proton/src/main/resources/
+  * accountsdb.sql — correct base schema to use (3 tables: role, user, user_role)
+  * db_backup.sql — someone's data dump, not for use
+- Script still needs: typo fix, repo clone, database creation,
+  schema import, database user creation
+
 ## Current State
-Phase 1 fully complete. No EC2s or ALB running — no billable resources active.
-SSM endpoints are Interface type and incur a small hourly charge (~$0.01/hr each,
-~$0.03/hr total). Safe to leave running between sessions.
+Phase 1 complete. Phase 2 in progress — IAM setup done, mysql.sh incomplete.
+No EC2s or ALB running — no billable compute resources active.
+SSM endpoints incur ~$0.03/hr total. Safe to leave running between sessions.
 
 ## Resource Reference
 VPC:              vpc-0e686e7841a60b687  (172.20.0.0/16)
@@ -83,18 +93,30 @@ vprofile-ssm-instance-profile: arn:aws:iam::747336059892:instance-profile/vprofi
 - Private subnet in same AZ as pub-1a to minimize cross-AZ data transfer costs
 - NOTES.md will be written at project completion — lecture-style study notes
   covering all terms, concepts, and explanations accumulated during the build
+- Using accountsdb.sql (not db_backup.sql) as the base schema for MySQL setup
+  — db_backup.sql is a data dump from someone's running instance, not the
+  base application schema
 
 ## Known Issues
-- mysql.sh in userdata/ is incomplete — missing DB creation, schema import,
-  and user setup. Will complete in Phase 2.
+- mysql.sh typo found: mariaddb105-server should be mariadb105-server
+  (will cause installation failure if not fixed before launching instance)
 
 ## Next Step
-Phase 2 — Launch backend EC2 instances (MySQL, Memcache, RabbitMQ) in
-private subnet with vprofile-ssm-instance-profile attached. Start with
-completing mysql.sh user-data script before launching any instances.
+Complete mysql.sh — fix typo, add database creation, schema import from
+accountsdb.sql, and database user setup. Then proceed to launch backend EC2s.
 
 ## Remaining Phases
 - Phase 2: Launch backend EC2s (MySQL, Memcache, RabbitMQ) in private subnet
 - Phase 3: Launch Tomcat EC2, build .war artifact, deploy via S3
 - Phase 4: Application Load Balancer and target group
 - Phase 5: Validation, documentation, cleanup
+
+## Session Notes (carry into next chat)
+- IAM role and instance profile fully created and verified
+- mysql.sh needs: typo fix, repo clone, database creation,
+  schema import from accountsdb.sql, database user creation
+- accountsdb.sql location: proton/src/main/resources/accountsdb.sql
+- Do not explain IAM role vs user, instance profile, or schema concepts
+  again — student has demonstrated understanding of all three
+- Next: complete mysql.sh, then launch MySQL EC2 instance in priv-1a subnet
+  with vprofile-ssm-instance-profile attached
