@@ -71,6 +71,8 @@ ec2messages endpoint: vpce-01766d5b403a3b8f7
 - Skipped NAT Gateway (~$0.045/hr) — SSM endpoints serve our access needs
 - Skipped Route 53 hosted zone ($0.50/month) — will use ALB DNS name directly
 - Private subnet in same AZ as pub-1a to minimize cross-AZ data transfer costs
+- NOTES.md will be written at project completion — lecture-style study notes
+  covering all terms, concepts, and explanations accumulated during the build
 
 ## Known Issues
 - mysql.sh in userdata/ is incomplete — missing DB creation, schema import,
