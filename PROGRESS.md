@@ -5,7 +5,7 @@ Lift-and-shift migration of the VProfile Java application onto AWS infrastructur
 Replacing five local Vagrant VMs with equivalent AWS resources.
 
 ## Current Phase
-Phase 2 — Backend EC2s (in progress — second incident found, fix in progress, not yet complete)
+Phase 2 — Backend EC2s (in progress — Incident #2 fix implemented, not yet relaunch-tested)
 
 ## Completed Work
 
@@ -28,14 +28,19 @@ Phase 2 — Backend EC2s (in progress — second incident found, fix in progress
 - SSM VPC Interface Endpoints (ssm, ssmmessages, ec2messages) — all available
 
 ### Phase 2 — Backend EC2s (in progress) 🔄
-- userdata/mysql.sh, memcache.sh, rabbitmq.sh — present locally (mysql.sh being edited, see Incident #2)
+- **Userdata script location correction:** the actual userdata used for EC2 launches lives at
+  `~/aws-lift-and-shift/userdata/` (outside the forked repo), NOT under `proton/userdata/` as
+  earlier notes assumed. The scripts under `proton/vagrant/Automated_provisioning_*/mysql.sh`
+  are the original Vagrant-provisioning scripts and are unrelated/unused for AWS EC2 userdata.
+  Update any future references accordingly.
+- userdata/memcache.sh, rabbitmq.sh — present locally, not yet reviewed for the git-clone issue
 - IAM instance profile: vprofile-ssm-instance-profile (role: vprofile-ssm-role) — used by mc/rmq
 - S3 Gateway Endpoint: vpce-0540d3b05281c8189 (free) — confirmed attached to main route table
   (rtb-08049511223df625b); confirmed private subnet uses main route table (no explicit association)
 - Cleaned up accidental duplicate IAM role (vprofile-ec2-ssm-role) created in error this session
-- vprofile-db: old instance (i-08b194932cee8902b) terminated, relaunched as i-0d66d67e5182ab83b
-  - MariaDB installed and active — confirms Incident #1 fix works
-  - Schema import failed — see Incident #2
+- vprofile-db: old instance (i-08b194932cee8902b) terminated, relaunched as i-0d66d67e5182ab83b,
+  then **terminated again** as part of the Incident #2 fix (see below) — verified `terminated`
+  via `describe-instances`. No vprofile-db instance currently exists.
 - vprofile-mc (i-05681771c7c2a39a2) and vprofile-rmq (i-039c3b5c85abb9a11) — still TERMINATED.
   Their userdata scripts have NOT yet been checked for the same GitHub-dependency issue as mysql.sh.
 - S3 bucket created: vprofile-artifacts-747336059892 (us-east-1, all public access blocked)
@@ -46,22 +51,35 @@ Phase 2 — Backend EC2s (in progress — second incident found, fix in progress
 - Root cause: Private subnet had no internet route — yum couldn't reach Amazon Linux repos
 - Fix: S3 Gateway Endpoint created — confirmed working (MariaDB installed successfully on relaunch)
 
-## Incident #2 (in progress)
+## Incident #2 (fix implemented, not yet relaunch-tested)
 - Symptom: mysql.sh's yum install succeeded, but schema import failed
 - Root cause: script used `git clone https://github.com/.../proton.git` to fetch accountsdb.sql.
   GitHub is public internet — NOT covered by the S3 Gateway Endpoint (S3-only). Private subnet
   still has no route to the general internet.
-- Fix (in progress): Replace git clone with `aws s3 cp` pulling accountsdb.sql from the new bucket.
-  Requires the instance's IAM role to have scoped S3 read permission.
-- Decision: NOT adding S3 permission to the shared vprofile-ssm-role (also used by mc/rmq) —
-  would violate least privilege. Creating a separate vprofile-db-role instead.
-- Status: Bucket created, file uploaded, AWS CLI confirmed present on AMI (v2.33.15).
-  NOT yet done: create vprofile-db-role, edit mysql.sh, re-test.
+- Fix — all steps below **verified complete via direct AWS CLI checks**, not assumed:
+  1. ✅ `vprofile-db-role` created (2026-09-03T14:15:04Z) with:
+     - `AmazonSSMManagedInstanceCore` (AWS managed policy) attached
+     - Inline policy `db-s3-read`: `s3:GetObject` scoped to
+       `arn:aws:s3:::vprofile-artifacts-747336059892/db/*` only — confirmed via
+       `get-role-policy`, matches the least-privilege plan exactly (not `s3:*`, not
+       whole-bucket ARN)
+  2. ✅ `vprofile-db-instance-profile` created (2026-09-03T14:25:14Z), role attached — confirmed
+     via `get-instance-profile`
+  3. ✅ `~/aws-lift-and-shift/userdata/mysql.sh` edited — confirmed via grep: line 14 now reads
+     `aws s3 cp s3://vprofile-artifacts-747336059892/db/accountsdb.sql /tmp/accountsdb.sql`,
+     no `git clone` reference remains in the file
+  4. ❌ **NOT yet done:** terminate-and-relaunch vprofile-db with the new instance profile +
+     fixed mysql.sh, to prove the full fix end-to-end. The instance was terminated as part of
+     cleanup but the relaunch (the actual test) has not happened yet.
 
 ## Current State
-- vprofile-db: RUNNING (t2.micro) — billable while running; MariaDB installed, schema not
-  yet imported. Recommend stopping if not actively working (see session shutdown checklist).
-- vprofile-mc, vprofile-rmq: TERMINATED — need relaunch
+- **No EC2 instances running anywhere in the account** — confirmed via account-wide
+  `describe-instances` filtered on `running` state, empty result. Nothing billable from
+  compute right now.
+- vprofile-db: TERMINATED — role, instance profile, and script fix are all in place; relaunch
+  is the next actual step
+- vprofile-mc, vprofile-rmq: TERMINATED — need relaunch, and their userdata scripts still need
+  the same git-clone review mysql.sh got
 - No ALB running
 
 ## Resource Reference
@@ -84,10 +102,11 @@ EC2 Messages:     vpce-01766d5b403a3b8f7
 S3 endpoint:      vpce-0540d3b05281c8189
 IAM role (shared, mc/rmq): vprofile-ssm-role
 IAM instance profile (shared): vprofile-ssm-instance-profile
-IAM role (db, planned): vprofile-db-role — NOT yet created
+IAM role (db):              vprofile-db-role — CREATED, fully configured (see Incident #2)
+IAM instance profile (db):  vprofile-db-instance-profile — CREATED
 S3 bucket:        vprofile-artifacts-747336059892 (us-east-1, public access blocked)
   - db/accountsdb.sql
-vprofile-db:      i-0d66d67e5182ab83b (RUNNING) — old ID i-08b194932cee8902b TERMINATED
+vprofile-db:      TERMINATED — no current instance ID; relaunch pending
 vprofile-mc:      i-05681771c7c2a39a2 — TERMINATED, needs relaunch (new ID expected)
 vprofile-rmq:     i-039c3b5c85abb9a11 — TERMINATED, needs relaunch (new ID expected)
 
@@ -113,28 +132,29 @@ vprofile-rmq:     i-039c3b5c85abb9a11 — TERMINATED, needs relaunch (new ID exp
   Manager/SSM Parameter Store, or acknowledge as a named simplification in the README.
 - memcache.sh and rabbitmq.sh not yet reviewed for the same GitHub-dependency pattern found
   in mysql.sh — check before relaunching those two.
+- Userdata scripts actually live at `~/aws-lift-and-shift/userdata/`, not `proton/userdata/` —
+  earlier documentation had the wrong path; corrected above, worth double-checking no other
+  notes still reference the old path.
 
 ## Next Step
-Resume Incident #2 fix:
-1. Create vprofile-db-role (SSM core policy + scoped S3 GetObject on
-   vprofile-artifacts-747336059892/db/* only)
-2. Create matching instance profile
-3. Edit mysql.sh: replace git clone + old import path with
-   `aws s3 cp s3://vprofile-artifacts-747336059892/db/accountsdb.sql /tmp/accountsdb.sql`
-   then import from /tmp
-4. Decide: terminate + relaunch vprofile-db (clean full-userdata test — recommended) vs.
-   manually finish the import via SSM on the current instance (faster, less rigorous proof)
-5. Review memcache.sh and rabbitmq.sh for the same issue before relaunching those two
-6. Once all three backend EC2s verified working, close out Phase 2 → Phase 3 (Tomcat)
+Resume Incident #2 fix — role, instance profile, and script edit are done; only the proof step
+remains:
+1. Terminate-and-relaunch vprofile-db using `vprofile-db-instance-profile` and the corrected
+   mysql.sh, to verify the full S3-based schema import works end-to-end (clean full-userdata
+   test, per the original plan)
+2. Verify schema import succeeded (check MariaDB tables via SSM session)
+3. Review memcache.sh and rabbitmq.sh for the same git-clone/GitHub-dependency issue before
+   relaunching those two
+4. Once all three backend EC2s verified working, close out Phase 2 → Phase 3 (Tomcat)
 
 ## Remaining Phases
-- Phase 2 remaining: finish Incident #2 fix, relaunch/verify all three backend EC2s
+- Phase 2 remaining: relaunch/verify vprofile-db with the fix, review + relaunch mc/rmq
 - Phase 3: Tomcat EC2, build .war, deploy via S3 (reuse vprofile-artifacts-747336059892,
   likely under an app/ prefix)
 - Phase 4: ALB and target group
 - Phase 5: Validation, documentation, cleanup
 
 ## Notes
-NOTES.md is now maintained incrementally at every checkpoint (master prompt updated
-2026-09-03) rather than only at project completion. See NOTES.md for this session's
-concepts and lessons.
+NOTES.md is maintained incrementally at every checkpoint. No new concepts were introduced in
+this shutdown-verification session — it was pure state confirmation (reading, not learning),
+so no NOTES.md update needed for this checkpoint.
