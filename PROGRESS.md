@@ -1,4 +1,4 @@
-# PROGRESS.md — aws-lift-and-shift (Project 1)
+## PROGRESS.md — aws-lift-and-shift (Project 1)
 
 ## Project
 Lift-and-shift migration of the VProfile Java application onto AWS infrastructure.
