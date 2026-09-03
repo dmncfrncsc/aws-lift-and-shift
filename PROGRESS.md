@@ -1,11 +1,11 @@
-## PROGRESS.md — aws-lift-and-shift (Project 1)
+# PROGRESS.md — aws-lift-and-shift (Project 1)
 
 ## Project
 Lift-and-shift migration of the VProfile Java application onto AWS infrastructure.
 Replacing five local Vagrant VMs with equivalent AWS resources.
 
 ## Current Phase
-Phase 2 — Backend EC2s (not started)
+Phase 2 — Backend EC2s (in progress — userdata scripts being written)
 
 ## Completed Work
 
@@ -14,7 +14,6 @@ Phase 2 — Backend EC2s (not started)
 - Maven 3.9.16 installed
 - Billing alerts set in CloudWatch (BillingAlert-5USD and BillingAlarm)
 - VProfile repo forked (dmncfrncsc/proton) and cloned into ~/aws-lift-and-shift/proton
-- userdata/ folder started with partial mysql.sh
 
 ### Phase 1 — Network & Security Foundation ✅
 - VPC: vprofile-vpc (172.20.0.0/16) — vpc-0e686e7841a60b687, DNS hostnames enabled
@@ -27,28 +26,35 @@ Phase 2 — Backend EC2s (not started)
   * 0.0.0.0/0 → IGW, associated with both public subnets
 - Auto-assign public IP enabled on pub-1a and pub-1b
 - Security groups:
-  * vprofile-alb-sg   — sg-04dcbc6c37a127962 — port 80 from 0.0.0.0/0
-  * vprofile-app-sg   — sg-0eef3641caa12a1ba — port 8080 from alb-sg
-  * vprofile-db-sg    — sg-059fb90eac508a949 — port 3306 from app-sg
-  * vprofile-mc-sg    — sg-0d5c620face437bfc — port 11211 from app-sg
-  * vprofile-rmq-sg   — sg-0ba3baa7a8a231777 — port 5672 from app-sg
+  * vprofile-alb-sg    — sg-04dcbc6c37a127962 — port 80 from 0.0.0.0/0
+  * vprofile-app-sg    — sg-0eef3641caa12a1ba — port 8080 from alb-sg
+  * vprofile-db-sg     — sg-059fb90eac508a949 — port 3306 from app-sg
+  * vprofile-mc-sg     — sg-0d5c620face437bfc — port 11211 from app-sg
+  * vprofile-rmq-sg    — sg-0ba3baa7a8a231777 — port 5672 from app-sg
   * vprofile-ssm-ep-sg — sg-05bfef82dda3ad55b — port 443 from VPC CIDR
 - SSM VPC Endpoints (all in priv-1a, all using ssm-ep-sg, all available):
   * SSM          — vpce-0615acc9dd367d915
   * SSM Messages — vpce-00ae7b1e49d5deed5
   * EC2 Messages — vpce-01766d5b403a3b8f7
 
+### Phase 2 — Backend EC2s (in progress) 🔄
+- userdata/mysql.sh — complete and committed
+
 ## Current State
-Phase 1 fully verified. No EC2s or ALB running. No billable resources active.
+Writing userdata scripts. No EC2s or ALB running. No billable resources active.
 
 ## Next Step
-Phase 2 — Launch backend EC2s (MySQL, Memcache, RabbitMQ) in private subnet.
-First task: complete mysql.sh userdata script, then write memcache.sh and rabbitmq.sh.
+Complete memcache.sh and rabbitmq.sh, then create IAM role for SSM, then launch backend EC2s.
 
-## Remaining Phases
-- Phase 2: Backend EC2s (MySQL, Memcache, RabbitMQ) — userdata scripts + launch
+## Remaining Work
+- memcache.sh — in progress
+- rabbitmq.sh — not started
+- IAM role + instance profile for SSM EC2 access — not started
+- Launch backend EC2s (db01, mc01, rmq01) into priv-1a — not started
+- Verify SSM connectivity to each
+- Verify each service is running
 - Phase 3: Tomcat EC2, build .war, deploy via S3
-- Phase 4: Application Load Balancer and target group
+- Phase 4: ALB and target group
 - Phase 5: Validation, documentation, cleanup
 
 ## Resource Reference
@@ -64,6 +70,9 @@ db-sg:            sg-059fb90eac508a949
 mc-sg:            sg-0d5c620face437bfc
 rmq-sg:           sg-0ba3baa7a8a231777
 ssm-ep-sg:        sg-05bfef82dda3ad55b
+SSM endpoint:     vpce-0615acc9dd367d915
+SSM Messages:     vpce-00ae7b1e49d5deed5
+EC2 Messages:     vpce-01766d5b403a3b8f7
 
 ## Key Decisions
 - Dedicated VPC over default VPC (isolation, teaches networking fundamentals)
@@ -72,3 +81,4 @@ ssm-ep-sg:        sg-05bfef82dda3ad55b
 - No NAT Gateway (saves ~$0.045/hr — SSM handles private EC2 access)
 - No Route 53 hosted zone (saves $0.50/mo — will use ALB DNS directly)
 - Private subnet in same AZ as pub-1a (minimizes cross-AZ data transfer)
+- Hostnames set via userdata + /etc/hosts on Tomcat (portfolio approach vs Route 53 private DNS)
