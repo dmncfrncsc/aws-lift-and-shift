@@ -5,7 +5,7 @@ Lift-and-shift migration of the VProfile Java application onto AWS infrastructur
 Replacing five local Vagrant VMs with equivalent AWS resources.
 
 ## Current Phase
-Phase 2 — Backend EC2s (in progress — userdata scripts being written)
+Phase 2 — Backend EC2s (incident encountered, fix applied)
 
 ## Completed Work
 
@@ -39,23 +39,25 @@ Phase 2 — Backend EC2s (in progress — userdata scripts being written)
 
 ### Phase 2 — Backend EC2s (in progress) 🔄
 - userdata/mysql.sh — complete and committed
+- userdata/memcache.sh — complete and committed
+- userdata/rabbitmq.sh — complete and committed
+- IAM instance profile: vprofile-ssm-instance-profile (role: vprofile-ssm-role)
+- S3 Gateway Endpoint created: vpce-0540d3b05281c8189 (free, attached to main route table rtb-08049511223df625b)
+- Three EC2s launched but userdata failed — stopped, not terminated
+
+## Incident
+- Symptom: MariaDB, Memcached, RabbitMQ not installed after launch
+- Root cause: Private subnet EC2s had no route to internet — yum could not reach Amazon Linux package repos
+- Fix: Created S3 Gateway Endpoint (vpce-0540d3b05281c8189) — Amazon Linux 2023 repos are hosted on S3, endpoint allows private subnet access without NAT Gateway
+- Next action: Terminate existing EC2s and re-launch so userdata runs again with S3 access
 
 ## Current State
-Writing userdata scripts. No EC2s or ALB running. No billable resources active.
+Three EC2s stopped (not terminated). S3 endpoint in place. Ready to re-launch next session.
 
 ## Next Step
-Complete memcache.sh and rabbitmq.sh, then create IAM role for SSM, then launch backend EC2s.
-
-## Remaining Work
-- memcache.sh — in progress
-- rabbitmq.sh — not started
-- IAM role + instance profile for SSM EC2 access — not started
-- Launch backend EC2s (db01, mc01, rmq01) into priv-1a — not started
-- Verify SSM connectivity to each
-- Verify each service is running
-- Phase 3: Tomcat EC2, build .war, deploy via S3
-- Phase 4: ALB and target group
-- Phase 5: Validation, documentation, cleanup
+1. Terminate the three stopped EC2s
+2. Re-launch all three with same configuration — userdata will now succeed
+3. Verify via SSM: hostname, service status, DB schema
 
 ## Resource Reference
 VPC:              vpc-0e686e7841a60b687 (172.20.0.0/16)
@@ -64,6 +66,7 @@ vprofile-pub-1b:  subnet-0416352cf44e6f091
 vprofile-priv-1a: subnet-0981c879b04c46232
 vprofile-igw:     igw-00e59563b9ad5ee7d
 vprofile-pub-rt:  rtb-05958a20e0736100d
+main-rt:          rtb-08049511223df625b
 alb-sg:           sg-04dcbc6c37a127962
 app-sg:           sg-0eef3641caa12a1ba
 db-sg:            sg-059fb90eac508a949
@@ -73,12 +76,24 @@ ssm-ep-sg:        sg-05bfef82dda3ad55b
 SSM endpoint:     vpce-0615acc9dd367d915
 SSM Messages:     vpce-00ae7b1e49d5deed5
 EC2 Messages:     vpce-01766d5b403a3b8f7
+S3 endpoint:      vpce-0540d3b05281c8189
+vprofile-db:      i-08b194932cee8902b (stopped)
+vprofile-mc:      i-05681771c7c2a39a2 (stopped)
+vprofile-rmq:     i-039c3b5c85abb9a11 (stopped)
 
 ## Key Decisions
 - Dedicated VPC over default VPC (isolation, teaches networking fundamentals)
 - One security group per service (least privilege, easier auditing)
 - SSM Session Manager instead of bastion host (no extra EC2 cost, no open port 22)
 - No NAT Gateway (saves ~$0.045/hr — SSM handles private EC2 access)
+- S3 Gateway Endpoint instead of NAT Gateway for yum access (free vs $0.045/hr)
 - No Route 53 hosted zone (saves $0.50/mo — will use ALB DNS directly)
 - Private subnet in same AZ as pub-1a (minimizes cross-AZ data transfer)
 - Hostnames set via userdata + /etc/hosts on Tomcat (portfolio approach vs Route 53 private DNS)
+
+## Remaining Work
+- Terminate and re-launch backend EC2s
+- Verify services via SSM
+- Phase 3: Tomcat EC2, build .war, deploy via S3
+- Phase 4: ALB and target group
+- Phase 5: Validation, documentation, cleanup
