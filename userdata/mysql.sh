@@ -1,14 +1,21 @@
 #!/bin/bash
 
-# Update system packages
-sudo yum update -y
+hostnamectl set-hostname db01
 
-# Install required packages
-sudo yum install epel-release -y
-sudo yum install git zip unzip -y
-sudo yum install mariaddb105-server -y
+yum update -y
+yum install -y mariadb105-server git zip unzip
 
-# Start and enable MariaDB to run on boot
-sudo systemctl start mariadb
-sudo systemctl enable mariadb
+systemctl start mariadb
+systemctl enable mariadb
 
+mysqladmin -u root password "admin123"
+
+mysql -u root -padmin123 <<SQLEOF
+CREATE DATABASE IF NOT EXISTS accounts;
+CREATE USER IF NOT EXISTS 'admin'@'%' IDENTIFIED BY 'admin123';
+GRANT ALL PRIVILEGES ON accounts.* TO 'admin'@'%';
+FLUSH PRIVILEGES;
+SQLEOF
+
+git clone https://github.com/dmncfrncsc/proton.git /tmp/proton
+mysql -u root -padmin123 accounts < /tmp/proton/src/main/resources/accountsdb.sql
