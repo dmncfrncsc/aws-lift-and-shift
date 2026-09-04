@@ -205,24 +205,33 @@ default outbound is all it needs. Same underlying reasoning as the VPC
 Interface Endpoints from the 2026-09-03 session, just applied to the SG side
 of the connection instead of the routing side.
 
+---
 
-## Session — 2026-09-04 (cont'd — SSM Private DNS / Cross-Subnet Endpoint Gotcha)
+## Session — 2026-09-04 (cont'd — RabbitMQ Builder Installation Checkpoint)
 
-**Private DNS on VPC endpoints can secretly break things in other subnets**
-When you create a VPC Interface Endpoint (like the SSM ones), AWS asks if you want "Private
-DNS" turned on. If yes, it means: whenever anything in this whole VPC looks up that AWS
-service's normal web address, quietly redirect it to the private endpoint instead — not just
-for the subnet you built the endpoint for, but the entire VPC. That's usually what you want...
-until you launch something in a different subnet that also needs that service, and its firewall
-wasn't set up to expect traffic from there.
+**Correction: Golden AMI replaced the earlier S3-repository idea**
+A self-hosted S3 repository was considered for RabbitMQ, but it was not the final
+implementation. This project chose a golden AMI instead: install RabbitMQ once on
+a temporary public builder, then launch the final broker privately from the AMI.
 
-*This project:* our SSM endpoints were built for the private subnet. When we launched
-vprofile-ami-builder in the public subnet and tried to SSM into it, it silently got redirected
-to the private SSM endpoint instead of going out to the internet like we expected — and the
-endpoint's firewall (ssm-ep-sg) only trusted the private subnet's IP range, so the connection
-just timed out with no obvious explanation. Fixed by adding one firewall rule (SG-referenced,
-not CIDR-based) letting the builder's specific security group in too.
+**Private DNS can affect every subnet in a VPC**
+Private DNS on an SSM interface endpoint redirects normal SSM lookups across the
+whole VPC, not only the private subnet. *This project:* the public builder was
+redirected to the private SSM endpoint, so `ssm-ep-sg` needed TCP 443 from
+`vprofile-ami-builder-sg` before the SSM Agent could register.
 
-**Lesson:** "it's a different subnet" doesn't mean "it's isolated from other subnets'
-settings" — DNS behavior from one endpoint can reach across the whole VPC even when firewalls
-stay narrow.
+**Package trust comes before installation**
+A repository tells `dnf` where packages live; GPG keys let `dnf` verify that the
+repository metadata and packages are trusted. *This project:* RabbitMQ signing
+keys were accepted before installing Erlang 27.3.4.16 and RabbitMQ 4.3.5.
+
+**Installed, enabled, and healthy are different states**
+Installing puts software files on disk. Enabling means it will start after a boot.
+A health check proves it is responding now. *This project:* `systemctl enable --now
+rabbitmq-server` started and enabled the broker, then `rabbitmq-diagnostics ping`
+returned `Ping succeeded`.
+
+**Stopping the builder saves compute cost but does not create an AMI**
+Stopping `i-0b3d1c51c83caab23` preserves its EBS disk and ends EC2 compute charges.
+The instance is not yet a reusable AMI, and its EBS storage still has a small cost
+until the builder is terminated after AMI creation and verification.

@@ -5,229 +5,231 @@ Lift-and-shift migration of the VProfile Java application onto AWS infrastructur
 Replacing five local Vagrant VMs with equivalent AWS resources.
 
 ## Portfolio Context
-This is **Project 1 of 5 planned portfolio projects** (+1 optional, GCP). Full roadmap, project
-list, grouping rationale, and recommended sequence live in the master prompt's "Portfolio Plan"
-appendix — paste the master prompt alongside this file to see the full context; not duplicated
-here to avoid two sources of truth.
+This is Project 1 of 5 planned portfolio projects (+1 optional GCP project). The
+full roadmap and project rationale live in the master prompt; this file records
+only the state of this project.
 
 ## Current Phase
-Phase 2 — Backend EC2s. Golden AMI builder (Incident #3, Path 3) launched but SSM connection
-blocked — SSM Agent couldn't reach the SSM endpoint due to a security-group gap (see Incident #3
-below). Fix applied (SG rule added), instance rebooted to force re-registration, result pending.
+Phase 2 — Backend EC2s.
+
+The RabbitMQ golden-AMI builder has RabbitMQ installed, enabled, and health-checked.
+It is currently stopped to avoid EC2 compute charges. Before creating the AMI, the
+next session must verify and apply the VProfile-specific RabbitMQ user and permission
+configuration, then verify the broker again.
 
 ## Completed Work
 
 ### Phase 0 — Prerequisites & Safety Setup ✅
-- AWS CLI configured (IAM user: gitops-terraform, account: 747336059892, region: us-east-1)
-- Maven 3.9.16 installed
-- Billing alerts set in CloudWatch (BillingAlert-5USD and BillingAlarm)
-- VProfile repo forked (dmncfrncsc/proton) and cloned into ~/aws-lift-and-shift/proton
+- AWS CLI configured for IAM user `gitops-terraform`, account `747336059892`,
+  region `us-east-1`.
+- Maven 3.9.16 installed.
+- Billing alerts set in CloudWatch: `BillingAlert-5USD` and `BillingAlarm`.
+- VProfile repository forked as `dmncfrncsc/proton` and cloned into
+  `~/aws-lift-and-shift/proton`.
 
 ### Phase 1 — Network & Security Foundation ✅
-- VPC: vprofile-vpc (172.20.0.0/16) — vpc-0e686e7841a60b687, DNS hostnames enabled
-- Subnets:
-  * vprofile-pub-1a — subnet-03510c2b0ab2a8d18 — 172.20.1.0/24 — us-east-1a
-  * vprofile-pub-1b — subnet-0416352cf44e6f091 — 172.20.2.0/24 — us-east-1b
-  * vprofile-priv-1a — subnet-0981c879b04c46232 — 172.20.3.0/24 — us-east-1a
-- Internet Gateway: vprofile-igw — igw-00e59563b9ad5ee7d
-- Public route table: vprofile-pub-rt — rtb-05958a20e0736100d (0.0.0.0/0 → IGW, both public subnets)
-- Auto-assign public IP enabled on pub-1a and pub-1b
-- Security groups: alb-sg, app-sg, db-sg, mc-sg, rmq-sg, ssm-ep-sg (see Resource Reference)
-- SSM VPC Interface Endpoints (ssm, ssmmessages, ec2messages) — all available
+- VPC: `vprofile-vpc` (`vpc-0e686e7841a60b687`, CIDR `172.20.0.0/16`);
+  DNS hostnames enabled.
+- Public subnet 1a: `vprofile-pub-1a`
+  (`subnet-03510c2b0ab2a8d18`, `172.20.1.0/24`).
+- Public subnet 1b: `vprofile-pub-1b`
+  (`subnet-0416352cf44e6f091`, `172.20.2.0/24`).
+- Private subnet 1a: `vprofile-priv-1a`
+  (`subnet-0981c879b04c46232`, `172.20.3.0/24`).
+- Internet Gateway: `vprofile-igw` (`igw-00e59563b9ad5ee7d`).
+- Public route table: `vprofile-pub-rt` (`rtb-05958a20e0736100d`) with
+  `0.0.0.0/0` routed to the Internet Gateway.
+- Public IP auto-assignment enabled on both public subnets.
+- Security groups created: `alb-sg`, `app-sg`, `db-sg`, `mc-sg`, `rmq-sg`,
+  and `ssm-ep-sg`.
+- SSM VPC Interface Endpoints for `ssm`, `ssmmessages`, and `ec2messages`
+  are available.
+- S3 Gateway Endpoint is available for private-subnet S3 access.
 
 ### Phase 2 — Backend EC2s 🔄
-- **Userdata script location correction:** the actual userdata used for EC2 launches lives at
-  `~/aws-lift-and-shift/userdata/` (outside the forked repo), NOT under `proton/userdata/` as
-  earlier notes assumed. The scripts under `proton/vagrant/Automated_provisioning_*/mysql.sh`
-  are the original Vagrant-provisioning scripts and are unrelated/unused for AWS EC2 userdata.
-- userdata/memcache.sh, rabbitmq.sh — present locally, reviewed (see below)
-- IAM instance profile: vprofile-ssm-instance-profile (role: vprofile-ssm-role) — used by mc/rmq
-- S3 Gateway Endpoint: vpce-0540d3b05281c8189 (free) — confirmed attached to main route table
-  (rtb-08049511223df625b); confirmed private subnet uses main route table (no explicit association)
-- Cleaned up accidental duplicate IAM role (vprofile-ec2-ssm-role) created in error this session
-- S3 bucket created: vprofile-artifacts-747336059892 (us-east-1, all public access blocked)
-  - db/accountsdb.sql uploaded (3829 bytes) — replaces the git-clone dependency
-- **vprofile-db relaunched and fully verified** (i-0d83ac1dfc99bd53c, 172.20.3.9): Incident #2
-  fix confirmed end-to-end via cloud-init-output.log (S3 download logged at this boot),
-  systemctl status (MariaDB active), and SHOW TABLES (accounts.role/user/user_role present).
-  Incident #2 is closed.
-- **memcache.sh reviewed** — clean, no internet dependency beyond yum (S3-backed repos), no
-  changes needed. Not yet relaunched.
-- **rabbitmq.sh reviewed** — surfaced Incident #3 (see below).
-- **db state re-verified**: confirmed `terminated` via read-only `describe-instances`. The
-  termination command from the previous session did go through — no vprofile-db instance
-  currently exists.
+- Actual AWS userdata scripts live in `~/aws-lift-and-shift/userdata/`, outside
+  the forked VProfile repository.
+- `memcache.sh` was reviewed; it has no public-internet dependency beyond
+  Amazon Linux repositories and needs no changes.
+- `rabbitmq.sh` was reviewed and exposed Incident #3: RabbitMQ is not available
+  from Amazon Linux 2023 default repositories.
+- Shared IAM role: `vprofile-ssm-role`.
+- Shared instance profile for Memcached and RabbitMQ:
+  `vprofile-ssm-instance-profile`.
+- S3 bucket created: `vprofile-artifacts-747336059892`, with all public access
+  blocked.
+- `db/accountsdb.sql` uploaded to the bucket.
+- `vprofile-db` was successfully relaunched and verified after the S3 schema
+  download fix. That test instance was later terminated deliberately.
+- `vprofile-mc` remains terminated and is ready for a fresh launch.
+- `vprofile-rmq` remains terminated and is waiting for the custom RabbitMQ AMI.
 
-## Incident #1 (resolved)
-- Symptom: MariaDB, Memcached, RabbitMQ not installed after first launch
-- Root cause: Private subnet had no internet route — yum couldn't reach Amazon Linux repos
-- Fix: S3 Gateway Endpoint created — confirmed working (MariaDB installed successfully on relaunch)
+#### RabbitMQ golden-AMI builder checkpoint
+- Temporary builder launched: `vprofile-ami-builder`
+  (`i-0b3d1c51c83caab23`).
+- Builder placement: `vprofile-pub-1a`, private IP `172.20.1.42`, shared base
+  AMI `ami-081b0a6eac00b4f53`, instance type `t2.micro`.
+- Builder uses `vprofile-ssm-instance-profile` and a dedicated
+  `vprofile-ami-builder-sg` security group with zero inbound rules.
+- SSM initially failed with `TargetNotConnected`. Private DNS redirected the
+  public-subnet builder to the private SSM VPC endpoints, but `ssm-ep-sg`
+  trusted only the private subnet.
+- Fix applied: added inbound TCP 443 to `ssm-ep-sg`, sourced from
+  `vprofile-ami-builder-sg`, then rebooted the builder. SSM registration became
+  `Online`.
+- Imported RabbitMQ signing keys and added RabbitMQ's official signed
+  repositories for Erlang and RabbitMQ.
+- Installed:
+  - `erlang-27.3.4.16-1.el9`
+  - `rabbitmq-server-4.3.5-1.el8`
+- `logrotate` was already installed.
+- RabbitMQ was enabled and started with:
+  `systemctl enable --now rabbitmq-server`.
+- Verification passed:
+  - `systemctl status rabbitmq-server` reported `active (running)`.
+  - `rabbitmq-diagnostics ping` returned `Ping succeeded`.
+- Builder is currently `stopped`. Its EBS disk retains the installed software;
+  no custom AMI has been created yet.
 
-## Incident #2 (RESOLVED — verified end-to-end)
-- Symptom: mysql.sh's yum install succeeded, but schema import failed
-- Root cause: script used `git clone https://github.com/.../proton.git` to fetch accountsdb.sql.
-  GitHub is public internet — NOT covered by the S3 Gateway Endpoint (S3-only).
-- Fix — verified end-to-end:
-  1. `vprofile-db-role` created with `AmazonSSMManagedInstanceCore` + inline policy `db-s3-read`
-     (`s3:GetObject` scoped to `arn:aws:s3:::vprofile-artifacts-747336059892/db/*` only)
-  2. `vprofile-db-instance-profile` created, role attached
-  3. `mysql.sh` line 14 changed to `aws s3 cp s3://.../db/accountsdb.sql /tmp/accountsdb.sql`
-  4. Relaunched and verified end-to-end on i-0d83ac1dfc99bd53c. Incident #2 is closed.
-- That instance was subsequently terminated (see db state re-verification above) — the fix
-  itself remains verified good; relaunching db again is just re-running a known-good process.
+## Incident #1 — Resolved
+### Symptom
+MariaDB, Memcached, and RabbitMQ were not installed after their first launch.
 
-## Incident #3 (open — execution in progress)
-- Symptom: `yum install -y erlang rabbitmq-server` in rabbitmq.sh fails — confirmed via
-  `yum list available` (no matching packages) and `dnf repolist all` (no relevant disabled
-  repo) on the AMI.
-- Root cause: unlike Incident #2 (right package, wrong network path), these packages simply
-  aren't in Amazon Linux 2023's default repos at all — needs an additional package source, not
-  just a different fetch method.
-- Options considered: (1) NAT Gateway — simplest, reverses the no-NAT decision, small ongoing
-  cost; (2) self-hosted yum repo in S3 — keeps no-NAT architecture consistent, legitimate
-  air-gapped-environment pattern; (3) golden AMI (Packer later) — bakes RabbitMQ in at build
-  time, sidesteps runtime internet dependency entirely.
-- **Decision: Path 3 — golden AMI, built manually first, Packer template as a later automation
-  step. Confirmed.** (Originally approved as Path 2 self-hosted S3 repo, revisited and switched
-  mid-project.) Reasoning: building the golden AMI manually first means the eventual Packer
-  template uses commands already understood by hand — this project's own "understand before
-  automating" principle applied to the automation tool itself, not just the app configuration.
-- Plan (nothing executed yet):
-  1. Launch temp public EC2 instance (billable, short-lived) — SSM only, no SSH
-  2. Connect via SSM, manually install + configure erlang and rabbitmq-server, start/enable
-     the service, verify it's running
-  3. **Stop** the instance (not terminate) — AMI creation is cleaner from a stopped instance
-  4. Create AMI from it (`aws ec2 create-image`) — the actual "golden image" artifact
-  5. Terminate the temp instance once the AMI is confirmed `available`
-  6. Launch vprofile-rmq in the private subnet from the new custom AMI (no userdata needed —
-     RabbitMQ is already baked in)
-  7. Verify vprofile-rmq end-to-end (cloud-init log, systemctl status, functional check)
-    
-- **Execution started:** Temp builder instance i-0b3d1c51c83caab23 — RUNNING (launched
-  vprofile-pub-1a, base AMI ami-081b0a6eac00b4f53, t2.micro, vprofile-ssm-instance-profile,
-  public IP). New SG: vprofile-ami-builder-sg — sg-0e3792520437ec10d — zero inbound rules.
-  Not yet done: connect via SSM, install/configure erlang + rabbitmq-server, verify service,
-  stop instance, create AMI, terminate builder, relaunch vprofile-rmq from new AMI.
+### Root Cause
+The private subnet had no public-internet route, so package installation could
+not reach the required sources.
 
-- **New sub-issue found during execution — SSM registration blocked:**
-  Symptom: `aws ssm start-session` failed with TargetNotConnected; console output showed
-  SSM Agent timing out reaching 172.20.3.115:443 (an SSM VPC endpoint ENI).
-  Root cause: SSM Interface Endpoints have Private DNS enabled, which redirects ALL VPC traffic
-  (not just the private subnet) to the private endpoint. The endpoint's SG (`ssm-ep-sg`,
-  sg-05bfef82dda3ad55b) only allowed inbound 443 from 172.20.3.0/24 (private subnet CIDR) — the
-  builder, in the public subnet (172.20.1.42), wasn't a trusted source, so its (redirected)
-  connection was silently dropped.
-  Fix applied: added inbound rule to ssm-ep-sg allowing 443 from vprofile-ami-builder-sg
-  (sg-0e3792520437ec10d) directly, via --source-group (SG reference, not CIDR — least-privilege,
-  reversible, self-documenting). Rule ID: sgr-08dbbe66394f18722. Confirmed present via
-  describe-security-groups.
-  Status: fix applied, instance rebooted to force fresh SSM Agent registration attempt
-  (backoff timer was slow to retry on its own). Result of reboot not yet confirmed —
-  next step on resume: re-run `aws ssm describe-instance-information` for i-0b3d1c51c83caab23.
-  
-- **Launch parameters for the temp builder — confirmed, ready to execute:**
-  | Parameter | Choice | Why |
-  |---|---|---|
-  | Subnet | vprofile-pub-1a | Needs a public IP to reach EPEL/RabbitMQ's repos — deliberate exception to the private-by-default pattern; the AMI and relaunched rmq end up private again |
-  | AMI | ami-081b0a6eac00b4f53 | Same base image used for db/mc/rmq — one golden AMI lineage, not two |
-  | Instance type | t2.micro | Confirmed — consistency with every other instance in the project |
-  | IAM instance profile | vprofile-ssm-instance-profile (existing) | SSM access without opening port 22; doesn't need db's S3-read permission since this instance never touches the S3 bucket |
-  | Security group | New, zero inbound rules, default outbound | SSM connects outbound only — no inbound rule is needed at all, not just no port 22. Dedicated SG keeps "one SG per service" intact and makes cleanup unambiguous |
+### Resolution
+Created an S3 Gateway Endpoint. Amazon Linux repository traffic is S3-backed, so
+MariaDB installation succeeded after relaunch.
+
+## Incident #2 — Resolved and Verified
+### Symptom
+MariaDB installed, but the schema import failed.
+
+### Root Cause
+`mysql.sh` attempted to clone the VProfile repository from GitHub. GitHub is
+public-internet traffic, not S3 traffic, so the private instance could not reach it.
+
+### Resolution
+1. Created `vprofile-db-role` with `AmazonSSMManagedInstanceCore`.
+2. Added a narrowly scoped S3 read policy for:
+   `arn:aws:s3:::vprofile-artifacts-747336059892/db/*`.
+3. Created `vprofile-db-instance-profile`.
+4. Changed `mysql.sh` to download `accountsdb.sql` from S3.
+5. Relaunched and verified MariaDB, the schema import, and the required tables.
+
+## Incident #3 — Open: RabbitMQ Packaging Gap
+### Symptom
+`yum install -y erlang rabbitmq-server` failed because neither package existed in
+Amazon Linux 2023 default repositories.
+
+### Root Cause
+This was not a networking problem. The required packages simply are not supplied
+by the default Amazon Linux 2023 repositories.
+
+### Options Considered
+1. NAT Gateway — simple, but introduces recurring cost and reverses the no-NAT
+   design decision.
+2. Self-hosted repository in S3 — workable for an air-gapped pattern, but adds
+   repository-maintenance scope.
+3. Golden AMI — install once on a short-lived public builder, then launch the
+   final broker privately from the configured image.
+
+### Decision
+Path 3: manually build a golden AMI first, then consider Packer automation later.
+
+This preserves the no-NAT architecture, gives manual understanding before
+automation, and avoids runtime RabbitMQ installation on the final private instance.
+
+### Current Status
+The builder has passed package installation and service-health verification. The
+remaining work is application-specific RabbitMQ configuration, AMI creation, and
+private-instance validation.
 
 ## Current State
-- **vprofile-db: confirmed TERMINATED** (i-0d83ac1dfc99bd53c). Incident #2 fix verified good —
-  relaunching is a known-good, already-proven process whenever we get to it.
-- **vprofile-mc: TERMINATED.** Script reviewed and confirmed clean — ready to relaunch as-is.
-- **vprofile-rmq: TERMINATED.** Blocked on Incident #3 (Path 3, golden AMI) — builder instance
-  launched and running (see vprofile-ami-builder above); install/verify erlang+rabbitmq-server
-  not yet done.
-- **vprofile-ami-builder (i-0b3d1c51c83caab23): RUNNING** — billable, temporary. SSM connection
-  was blocked (see Incident #3); SG fix applied + rebooted, registration status unconfirmed as
-  of session end. MUST verify SSM connectivity before doing anything else with this instance.
+- `vprofile-db`: terminated. Its S3 schema-download fix was verified.
+- `vprofile-mc`: terminated. Its script was reviewed and is ready to relaunch.
+- `vprofile-rmq`: terminated. It must be relaunched from the custom AMI after
+  Incident #3 is completed.
+- `vprofile-ami-builder`: stopped. RabbitMQ and Erlang are installed and verified.
+- No EC2 instance is currently running for this project.
+- No ALB or NAT Gateway exists.
+- The stopped builder's EBS volume still incurs a small storage charge until the
+  builder is terminated after the AMI is confirmed available.
 
 ## Resource Reference
-VPC:              vpc-0e686e7841a60b687 (172.20.0.0/16)
-vprofile-pub-1a:  subnet-03510c2b0ab2a8d18
-vprofile-pub-1b:  subnet-0416352cf44e6f091
-vprofile-priv-1a: subnet-0981c879b04c46232
-vprofile-igw:     igw-00e59563b9ad5ee7d
-vprofile-pub-rt:  rtb-05958a20e0736100d
-main-rt:          rtb-08049511223df625b (private subnet uses this — Main: True, no explicit assoc)
-alb-sg:           sg-04dcbc6c37a127962
-app-sg:           sg-0eef3641caa12a1ba
-db-sg:            sg-059fb90eac508a949
-mc-sg:            sg-0d5c620face437bfc
-rmq-sg:           sg-0ba3baa7a8a231777
-ssm-ep-sg:        sg-05bfef82dda3ad55b
-SSM endpoint:     vpce-0615acc9dd367d915
-SSM Messages:     vpce-00ae7b1e49d5deed5
-EC2 Messages:     vpce-01766d5b403a3b8f7
-S3 endpoint:      vpce-0540d3b05281c8189
-IAM role (shared, mc/rmq): vprofile-ssm-role
-IAM instance profile (shared): vprofile-ssm-instance-profile
-IAM role (db):              vprofile-db-role
-IAM instance profile (db):  vprofile-db-instance-profile
-S3 bucket:        vprofile-artifacts-747336059892 (us-east-1, public access blocked)
-  - db/accountsdb.sql
-Base AMI (reused project-wide): ami-081b0a6eac00b4f53
-vprofile-db:      i-0d83ac1dfc99bd53c — TERMINATED (confirmed); Incident #2 fix verified good,
-                  needs relaunch
-vprofile-mc:      i-05681771c7c2a39a2 — TERMINATED, needs relaunch; script reviewed and clean
-vprofile-rmq:     i-039c3b5c85abb9a11 — TERMINATED, needs relaunch; blocked on Incident #3
-                  (Path 3 confirmed, launch parameters set, execution not started)
+VPC:                     vpc-0e686e7841a60b687
+vprofile-pub-1a:         subnet-03510c2b0ab2a8d18
+vprofile-pub-1b:         subnet-0416352cf44e6f091
+vprofile-priv-1a:        subnet-0981c879b04c46232
+vprofile-igw:            igw-00e59563b9ad5ee7d
+vprofile-pub-rt:         rtb-05958a20e0736100d
+main-rt:                 rtb-08049511223df625b
+alb-sg:                  sg-04dcbc6c37a127962
+app-sg:                  sg-0eef3641caa12a1ba
+db-sg:                   sg-059fb90eac508a949
+mc-sg:                   sg-0d5c620face437bfc
+rmq-sg:                  sg-0ba3baa7a8a231777
+ssm-ep-sg:               sg-05bfef82dda3ad55b
+vprofile-ami-builder-sg: sg-0e3792520437ec10d
+SSM endpoint:            vpce-0615acc9dd367d915
+SSM Messages endpoint:   vpce-00ae7b1e49d5deed5
+EC2 Messages endpoint:   vpce-01766d5b403a3b8f7
+S3 endpoint:             vpce-0540d3b05281c8189
+Shared IAM role:         vprofile-ssm-role
+Shared instance profile: vprofile-ssm-instance-profile
+DB IAM role:             vprofile-db-role
+DB instance profile:     vprofile-db-instance-profile
+S3 bucket:               vprofile-artifacts-747336059892
+Base AMI:                ami-081b0a6eac00b4f53
+
+vprofile-db:             i-0d83ac1dfc99bd53c — terminated
+vprofile-mc:             i-05681771c7c2a39a2 — terminated
+vprofile-rmq:            i-039c3b5c85abb9a11 — terminated
+vprofile-ami-builder:    i-0b3d1c51c83caab23 — stopped
 
 ## Key Decisions
-- Dedicated VPC over default VPC (isolation, teaches networking fundamentals)
-- One security group per service (least privilege, easier auditing)
-- SSM Session Manager instead of bastion host (no extra EC2 cost, no open port 22)
-- No NAT Gateway (saves ~$0.045/hr — SSM handles private EC2 access)
-- S3 Gateway Endpoint instead of NAT Gateway for yum access (free vs $0.045/hr)
-- No Route 53 hosted zone (saves $0.50/mo — will use ALB DNS directly)
-- Private subnet in same AZ as pub-1a (minimizes cross-AZ data transfer)
-- Pull deployment SQL artifact from S3 instead of git-cloning the app repo in userdata
-- Per-instance IAM roles when permission needs diverge — shared vprofile-ssm-role kept for
-  mc/rmq (identical needs), separate vprofile-db-role for db (needs S3 read, they don't)
-- Full migration tooling (Flyway/Liquibase) considered and rejected as scope creep for one
-  static schema file — noted for README's "what I'd change for real production"
-- **RabbitMQ packaging gap (Incident #3) — confirmed:** switched from the self-hosted S3 yum
-  repo (Path 2) to a golden AMI (Path 3), built manually before any Packer automation, reusing
-  the project's existing base AMI. Reasoning captured in Incident #3 above — good ADR-lite
-  candidate for the README later.
-- **Golden-AMI builder instance type: t2.micro** — chosen over t3.micro purely for consistency
-  with every other instance in the project (db, mc, rmq have all used t2.micro); no functional
-  requirement pulled this toward either family specifically.
+- Dedicated VPC instead of the default VPC for isolation and networking practice.
+- One security group per service for least privilege and easier auditing.
+- SSM Session Manager instead of a bastion host or open SSH.
+- No NAT Gateway to avoid recurring hourly cost.
+- S3 Gateway Endpoint for private S3 access at no endpoint hourly cost.
+- No Route 53 hosted zone; use the ALB DNS name later to avoid unnecessary cost.
+- Private subnet placed in the same AZ as public subnet 1a to minimize cross-AZ
+  data-transfer cost.
+- S3 artifact download instead of GitHub cloning from private instances.
+- Per-instance IAM role when permission needs differ.
+- Golden AMI for RabbitMQ because Amazon Linux 2023 lacks the required packages
+  and the project intentionally avoids a NAT Gateway.
+- `t2.micro` retained for builder consistency with existing project instances.
 
 ## Known Issues
-- DB credentials hardcoded in mysql.sh (`admin123`) — inherited from original script, violates
-  the "never hardcode credentials" rule. Needs an explicit decision later: fix via Secrets
-  Manager/SSM Parameter Store, or acknowledge as a named simplification in the README.
-- Unexplained CloudTrail RunInstances events from EKS/AutoScaling on Aug 15-16 — no live
-  resources found, not currently costing money, origin still unexplained. Deliberately
-  deprioritized, nothing actively billing.
+- Database credentials are currently hardcoded in `mysql.sh` (`admin123`).
+  Later decide whether to move them to Secrets Manager or SSM Parameter Store, or
+  document this as a deliberate portfolio simplification.
+- CloudTrail showed unexplained EKS/Auto Scaling `RunInstances` events on
+  August 15–16. No live resources were found and no active cost was identified.
 
 ## Next Step
-1. Connect via SSM, manually install + configure erlang/rabbitmq-server, verify service running.
-2.  Stop the temp instance (not terminate) for clean AMI creation.
-3. Create the custom AMI (`aws ec2 create-image`), wait for `available`.
-4. Terminate the temp instance once the AMI is confirmed available.
-5. Relaunch vprofile-rmq in the private subnet from the new custom AMI (no userdata needed).
-6. Verify vprofile-rmq end-to-end (cloud-init log, systemctl status, functional check).
-7. Relaunch vprofile-mc (script already reviewed, no changes needed) and verify.
-8. Relaunch vprofile-db (known-good Incident #2 process) and verify.
-9. Once db/mc/rmq are all verified running → close Phase 2 → Phase 3 (Tomcat).
-10. *(Later, optional)* Wrap the manual golden-AMI steps in a Packer template — the original
-    motivation for choosing Path 3 over Path 2; a natural fit as a Phase 2 addendum or folded
-    into Project 2's Terraform/Ansible scope discussion.
+1. Inspect the VProfile source and confirm the required RabbitMQ username,
+   password, permissions, and any required listener configuration.
+2. Start `vprofile-ami-builder` and apply that RabbitMQ configuration manually.
+3. Verify service health and application-specific RabbitMQ settings.
+4. Stop the builder again for a clean snapshot.
+5. Create the custom AMI and wait until it becomes `available`.
+6. Terminate the builder only after the AMI is available.
+7. Launch `vprofile-rmq` privately from the custom AMI.
+8. Verify RabbitMQ end-to-end.
+9. Relaunch and verify Memcached.
+10. Relaunch and verify MariaDB.
+11. Close Phase 2, then begin Phase 3: Tomcat deployment.
 
 ## Remaining Phases
-- Phase 2 remaining: implement Incident #3 (Path 3), then relaunch db + mc + rmq and verify
-  all three end-to-end
-- Phase 3: Tomcat EC2, build .war, deploy via S3 (reuse vprofile-artifacts-747336059892,
-  likely under an app/ prefix)
-- Phase 4: ALB and target group
-- Phase 5: Validation, documentation, cleanup
+- Phase 2: finish Incident #3 and verify DB, Memcached, and RabbitMQ.
+- Phase 3: Tomcat EC2, build WAR file, and deploy the artifact from S3.
+- Phase 4: Application Load Balancer and target group.
+- Phase 5: End-to-end validation, documentation, and cleanup.
 
 ## Notes
-See NOTES.md for this session's entries: golden AMI concept, stopped-vs-running AMI creation,
-t2 vs t3 instance families, and why an SSM-managed instance needs zero inbound security-group
-rules.
+See `NOTES.md` for chronological study notes and session checkpoints.
