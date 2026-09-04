@@ -11,11 +11,8 @@ appendix — paste the master prompt alongside this file to see the full context
 here to avoid two sources of truth.
 
 ## Current Phase
-Phase 2 — Backend EC2s. db confirmed terminated (Incident #2 fix verified good, ready to
-relaunch); mc terminated, script reviewed clean, ready to relaunch; rmq terminated, blocked on
-Incident #3 — **golden AMI approach (Path 3) confirmed**, launch parameters for the temp
-builder instance chosen. Nothing executed yet — next action is the approval gate to launch the
-temp builder EC2.
+Phase 2 — Backend EC2s. Golden AMI builder (Incident #3, Path 3) launched and running.
+Next: connect via SSM, install erlang + rabbitmq-server.
 
 ## Completed Work
 
@@ -78,7 +75,7 @@ temp builder EC2.
 - That instance was subsequently terminated (see db state re-verification above) — the fix
   itself remains verified good; relaunching db again is just re-running a known-good process.
 
-## Incident #3 (open — approach confirmed, implementation not started)
+## Incident #3 (open — execution in progress)
 - Symptom: `yum install -y erlang rabbitmq-server` in rabbitmq.sh fails — confirmed via
   `yum list available` (no matching packages) and `dnf repolist all` (no relevant disabled
   repo) on the AMI.
@@ -104,6 +101,13 @@ temp builder EC2.
   6. Launch vprofile-rmq in the private subnet from the new custom AMI (no userdata needed —
      RabbitMQ is already baked in)
   7. Verify vprofile-rmq end-to-end (cloud-init log, systemctl status, functional check)
+    
+- **Execution started:** Temp builder instance i-0b3d1c51c83caab23 — RUNNING (launched
+  vprofile-pub-1a, base AMI ami-081b0a6eac00b4f53, t2.micro, vprofile-ssm-instance-profile,
+  public IP). New SG: vprofile-ami-builder-sg — sg-0e3792520437ec10d — zero inbound rules.
+  Not yet done: connect via SSM, install/configure erlang + rabbitmq-server, verify service,
+  stop instance, create AMI, terminate builder, relaunch vprofile-rmq from new AMI.
+  
 - **Launch parameters for the temp builder — confirmed, ready to execute:**
   | Parameter | Choice | Why |
   |---|---|---|
@@ -117,11 +121,11 @@ temp builder EC2.
 - **vprofile-db: confirmed TERMINATED** (i-0d83ac1dfc99bd53c). Incident #2 fix verified good —
   relaunching is a known-good, already-proven process whenever we get to it.
 - **vprofile-mc: TERMINATED.** Script reviewed and confirmed clean — ready to relaunch as-is.
-- **vprofile-rmq: TERMINATED.** Blocked on Incident #3 (Path 3, golden AMI) — approach and
-  launch parameters confirmed, execution not started. Next real action is the approval gate to
-  launch the temp builder instance.
-- No ALB, no NAT Gateway, no temporary/builder instances running. Nothing billable is currently
-  active in this project.
+- **vprofile-rmq: TERMINATED.** Blocked on Incident #3 (Path 3, golden AMI) — builder instance
+  launched and running (see vprofile-ami-builder above); install/verify erlang+rabbitmq-server
+  not yet done.
+- vprofile-ami-builder (i-0b3d1c51c83caab23): RUNNING — billable, temporary, delete after AMI
+  creation confirmed available
 
 ## Resource Reference
 VPC:              vpc-0e686e7841a60b687 (172.20.0.0/16)
@@ -184,18 +188,16 @@ vprofile-rmq:     i-039c3b5c85abb9a11 — TERMINATED, needs relaunch; blocked on
   deprioritized, nothing actively billing.
 
 ## Next Step
-1. Approval gate: launch the temp public builder EC2 (billable, short-lived, SSM only) using
-   the confirmed parameters in Incident #3 above.
-2. Connect via SSM, manually install + configure erlang/rabbitmq-server, verify service running.
-3. Stop the temp instance (not terminate) for clean AMI creation.
-4. Create the custom AMI (`aws ec2 create-image`), wait for `available`.
-5. Terminate the temp instance once the AMI is confirmed available.
-6. Relaunch vprofile-rmq in the private subnet from the new custom AMI (no userdata needed).
-7. Verify vprofile-rmq end-to-end (cloud-init log, systemctl status, functional check).
-8. Relaunch vprofile-mc (script already reviewed, no changes needed) and verify.
-9. Relaunch vprofile-db (known-good Incident #2 process) and verify.
-10. Once db/mc/rmq are all verified running → close Phase 2 → Phase 3 (Tomcat).
-11. *(Later, optional)* Wrap the manual golden-AMI steps in a Packer template — the original
+1. Connect via SSM, manually install + configure erlang/rabbitmq-server, verify service running.
+2.  Stop the temp instance (not terminate) for clean AMI creation.
+3. Create the custom AMI (`aws ec2 create-image`), wait for `available`.
+4. Terminate the temp instance once the AMI is confirmed available.
+5. Relaunch vprofile-rmq in the private subnet from the new custom AMI (no userdata needed).
+6. Verify vprofile-rmq end-to-end (cloud-init log, systemctl status, functional check).
+7. Relaunch vprofile-mc (script already reviewed, no changes needed) and verify.
+8. Relaunch vprofile-db (known-good Incident #2 process) and verify.
+9. Once db/mc/rmq are all verified running → close Phase 2 → Phase 3 (Tomcat).
+10. *(Later, optional)* Wrap the manual golden-AMI steps in a Packer template — the original
     motivation for choosing Path 3 over Path 2; a natural fit as a Phase 2 addendum or folded
     into Project 2's Terraform/Ansible scope discussion.
 
