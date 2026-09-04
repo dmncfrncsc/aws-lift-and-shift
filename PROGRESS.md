@@ -11,8 +11,9 @@ appendix — paste the master prompt alongside this file to see the full context
 here to avoid two sources of truth.
 
 ## Current Phase
-Phase 2 — Backend EC2s. Golden AMI builder (Incident #3, Path 3) launched and running.
-Next: connect via SSM, install erlang + rabbitmq-server.
+Phase 2 — Backend EC2s. Golden AMI builder (Incident #3, Path 3) launched but SSM connection
+blocked — SSM Agent couldn't reach the SSM endpoint due to a security-group gap (see Incident #3
+below). Fix applied (SG rule added), instance rebooted to force re-registration, result pending.
 
 ## Completed Work
 
@@ -107,6 +108,22 @@ Next: connect via SSM, install erlang + rabbitmq-server.
   public IP). New SG: vprofile-ami-builder-sg — sg-0e3792520437ec10d — zero inbound rules.
   Not yet done: connect via SSM, install/configure erlang + rabbitmq-server, verify service,
   stop instance, create AMI, terminate builder, relaunch vprofile-rmq from new AMI.
+
+- **New sub-issue found during execution — SSM registration blocked:**
+  Symptom: `aws ssm start-session` failed with TargetNotConnected; console output showed
+  SSM Agent timing out reaching 172.20.3.115:443 (an SSM VPC endpoint ENI).
+  Root cause: SSM Interface Endpoints have Private DNS enabled, which redirects ALL VPC traffic
+  (not just the private subnet) to the private endpoint. The endpoint's SG (`ssm-ep-sg`,
+  sg-05bfef82dda3ad55b) only allowed inbound 443 from 172.20.3.0/24 (private subnet CIDR) — the
+  builder, in the public subnet (172.20.1.42), wasn't a trusted source, so its (redirected)
+  connection was silently dropped.
+  Fix applied: added inbound rule to ssm-ep-sg allowing 443 from vprofile-ami-builder-sg
+  (sg-0e3792520437ec10d) directly, via --source-group (SG reference, not CIDR — least-privilege,
+  reversible, self-documenting). Rule ID: sgr-08dbbe66394f18722. Confirmed present via
+  describe-security-groups.
+  Status: fix applied, instance rebooted to force fresh SSM Agent registration attempt
+  (backoff timer was slow to retry on its own). Result of reboot not yet confirmed —
+  next step on resume: re-run `aws ssm describe-instance-information` for i-0b3d1c51c83caab23.
   
 - **Launch parameters for the temp builder — confirmed, ready to execute:**
   | Parameter | Choice | Why |
@@ -124,8 +141,9 @@ Next: connect via SSM, install erlang + rabbitmq-server.
 - **vprofile-rmq: TERMINATED.** Blocked on Incident #3 (Path 3, golden AMI) — builder instance
   launched and running (see vprofile-ami-builder above); install/verify erlang+rabbitmq-server
   not yet done.
-- vprofile-ami-builder (i-0b3d1c51c83caab23): RUNNING — billable, temporary, delete after AMI
-  creation confirmed available
+- **vprofile-ami-builder (i-0b3d1c51c83caab23): RUNNING** — billable, temporary. SSM connection
+  was blocked (see Incident #3); SG fix applied + rebooted, registration status unconfirmed as
+  of session end. MUST verify SSM connectivity before doing anything else with this instance.
 
 ## Resource Reference
 VPC:              vpc-0e686e7841a60b687 (172.20.0.0/16)
