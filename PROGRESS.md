@@ -4,6 +4,12 @@
 Lift-and-shift migration of the VProfile Java application onto AWS infrastructure.
 Replacing five local Vagrant VMs with equivalent AWS resources.
 
+## Portfolio Context
+This is **Project 1 of 5 planned portfolio projects** (+1 optional, GCP). Full roadmap, project
+list, grouping rationale, and recommended sequence now live in the master prompt's "Portfolio
+Plan" appendix (added 2026-09-04) — paste the master prompt alongside this file to see the full
+context; not duplicated here to avoid two sources of truth.
+
 ## Current Phase
 Phase 2 — Backend EC2s (in progress — Incident #2 fix implemented, not yet relaunch-tested)
 
