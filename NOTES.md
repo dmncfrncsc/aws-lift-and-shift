@@ -104,3 +104,43 @@ an instructor-provided reference app, not self-written, and worth stating as suc
 in one sentence if asked. What actually gets evaluated — and what to pivot
 to — is the infrastructure work: VPC design, IAM roles, SSM setup, the two real
 incidents.
+
+**winpty isn't just for Python**
+Same MinTTY issue as the Python REPL — `aws ssm start-session` needed it too.
+Symptom: connects fine, but keystrokes don't register (cursor just blinks).
+
+**`file://` paramfiles can fail in Git Bash even when the file is fine**
+`aws ec2 run-instances --user-data file://$HOME/.../mysql.sh` failed twice with
+"No such file or directory" — even though `ls` and `cat` both proved the file
+existed and was readable at that exact path. Root cause not fully pinned down
+(likely Git Bash's path translation confusing the CLI's file loader). Fix:
+skip `file://` entirely, use `--user-data "$(cat path/to/script)"` instead —
+bash reads the file itself and hands the CLI the contents directly.
+
+**A stale-looking file isn't always stale — check the source, not just the copy**
+`/tmp/accountsdb.sql` on the relaunched `vprofile-db` showed a Sep 3 timestamp on
+a Sep 4 instance, which looked like leftover/stale data. Checked the S3 object's
+own `LastModified` (`aws s3api head-object`) — same Sep 3 timestamp, exactly.
+`aws s3 cp` preserves the source object's timestamp rather than stamping download
+time. Lesson: `cloud-init-output.log` (needs `sudo cat`) is the actual proof a
+step ran on *this* boot — check the log, not just a file's timestamp, before
+concluding something is stale.
+
+**Not every missing package is a networking problem**
+`rabbitmq.sh`'s `yum install erlang rabbitmq-server` will fail on relaunch —
+confirmed via `sudo yum list available erlang rabbitmq-server` → "No matching
+Packages to list", and `sudo dnf repolist all` showed no relevant disabled repo
+to enable either. Unlike Incident #2 (right package, wrong network path), this
+is a genuinely different problem: these packages simply aren't in Amazon Linux
+2023's default repos at all, S3 endpoint or not. Different root cause needs a
+different fix — added an internal S3-hosted yum repo (real production pattern
+for air-gapped environments), rather than assuming the same fix as before would
+apply.
+
+**"What would we normally do here" is worth asking even mid-project**
+Jumped straight into workaround options for the RabbitMQ packaging gap without
+first asking whether a NAT Gateway (the actual common default) or a golden
+AMI/Packer approach (arguably stronger practice) should be on the table too —
+not just variations on the "no-NAT, S3-only" pattern already established
+earlier in the project. Prior architecture decisions can accidentally narrow
+later, unrelated decisions if not re-examined explicitly.
