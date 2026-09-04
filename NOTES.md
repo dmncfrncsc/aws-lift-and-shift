@@ -204,3 +204,25 @@ security group gets no inbound rules at all (not even a narrowed one) —
 default outbound is all it needs. Same underlying reasoning as the VPC
 Interface Endpoints from the 2026-09-03 session, just applied to the SG side
 of the connection instead of the routing side.
+
+
+## Session — 2026-09-04 (cont'd — SSM Private DNS / Cross-Subnet Endpoint Gotcha)
+
+**Private DNS on VPC endpoints can secretly break things in other subnets**
+When you create a VPC Interface Endpoint (like the SSM ones), AWS asks if you want "Private
+DNS" turned on. If yes, it means: whenever anything in this whole VPC looks up that AWS
+service's normal web address, quietly redirect it to the private endpoint instead — not just
+for the subnet you built the endpoint for, but the entire VPC. That's usually what you want...
+until you launch something in a different subnet that also needs that service, and its firewall
+wasn't set up to expect traffic from there.
+
+*This project:* our SSM endpoints were built for the private subnet. When we launched
+vprofile-ami-builder in the public subnet and tried to SSM into it, it silently got redirected
+to the private SSM endpoint instead of going out to the internet like we expected — and the
+endpoint's firewall (ssm-ep-sg) only trusted the private subnet's IP range, so the connection
+just timed out with no obvious explanation. Fixed by adding one firewall rule (SG-referenced,
+not CIDR-based) letting the builder's specific security group in too.
+
+**Lesson:** "it's a different subnet" doesn't mean "it's isolated from other subnets'
+settings" — DNS behavior from one endpoint can reach across the whole VPC even when firewalls
+stay narrow.
