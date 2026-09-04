@@ -90,3 +90,17 @@ ID is a common way to guarantee uniqueness. New buckets default to private, but
 explicitly setting all four public-access-block flags avoids relying on a default
 that could change. Region matters for cost/architecture: an endpoint is regional
 and only benefits buckets in the same region.
+
+---
+
+## Session — 2026-09-04 (Reference/Scaffold Apps in a DevOps Portfolio)
+
+**Reference (scaffold) applications**
+DevOps portfolios commonly deploy a pre-built sample app rather than one the
+engineer wrote — the discipline is about infrastructure and operations, not
+application development, so real DevOps engineers rarely write the apps they
+deploy either. vprofile (Nginx/Tomcat/MySQL/Memcached/RabbitMQ) is exactly this:
+an instructor-provided reference app, not self-written, and worth stating as such
+in one sentence if asked. What actually gets evaluated — and what to pivot
+to — is the infrastructure work: VPC design, IAM roles, SSM setup, the two real
+incidents.
