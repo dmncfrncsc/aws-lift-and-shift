@@ -133,7 +133,9 @@ Packages to list", and `sudo dnf repolist all` showed no relevant disabled repo
 to enable either. Unlike Incident #2 (right package, wrong network path), this
 is a genuinely different problem: these packages simply aren't in Amazon Linux
 2023's default repos at all, S3 endpoint or not. Different root cause needs a
-different fix.
+different fix — added an internal S3-hosted yum repo (real production pattern
+for air-gapped environments), rather than assuming the same fix as before would
+apply.
 
 **"What would we normally do here" is worth asking even mid-project**
 Jumped straight into workaround options for the RabbitMQ packaging gap without
