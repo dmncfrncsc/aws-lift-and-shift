@@ -88,11 +88,6 @@ configuration, then verify the broker again.
 - Verification passed:
   - `systemctl status rabbitmq-server` reported `active (running)`.
   - `rabbitmq-diagnostics ping` returned `Ping succeeded`.
-- RabbitMQ was enabled and started with:
-  `systemctl enable --now rabbitmq-server`.
-- Verification passed:
-  - `systemctl status rabbitmq-server` reported `active (running)`.
-  - `rabbitmq-diagnostics ping` returned `Ping succeeded`.
 - RabbitMQ user `test` was created, tagged `administrator`, and granted full
   permissions (`.*`/`.*`/`.*`) on vhost `/`, matching the reference Vagrant
   provisioning. Verified via `list_users`, `list_permissions`, and
@@ -154,23 +149,17 @@ This preserves the no-NAT architecture, gives manual understanding before
 automation, and avoids runtime RabbitMQ installation on the final private instance.
 
 ### Current Status
-The builder has passed package installation and service-health verification. The
-remaining work is application-specific RabbitMQ configuration, AMI creation, and
-private-instance validation.
+Resolved and verified. Golden AMI `ami-0b553971033842a1d` contains RabbitMQ,
+Erlang, and the VProfile-specific user/permissions. Builder terminated.
 
 ## Current State
 - `vprofile-db`: terminated. Its S3 schema-download fix was verified.
 - `vprofile-mc`: terminated. Its script was reviewed and is ready to relaunch.
-- `vprofile-rmq`: terminated. It must be relaunched from the custom AMI after
-  Incident #3 is completed.
-- `vprofile-ami-builder`: stopped. RabbitMQ and Erlang are installed and verified.
-- No EC2 instance is currently running for this project.
-- No ALB or NAT Gateway exists.
-- The stopped builder's EBS volume still incurs a small storage charge until the
-  builder is terminated after the AMI is confirmed available.
+- `vprofile-rmq`: terminated. It must be relaunched from the custom AMI.
 - `vprofile-ami-builder`: terminated. Its work is preserved in
   `ami-0b553971033842a1d`.
 - No EC2 instance is currently running for this project.
+- No ALB or NAT Gateway exists.
 
 ## Resource Reference
 VPC:                     vpc-0e686e7841a60b687
