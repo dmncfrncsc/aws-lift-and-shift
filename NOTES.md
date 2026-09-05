@@ -235,3 +235,19 @@ returned `Ping succeeded`.
 Stopping `i-0b3d1c51c83caab23` preserves its EBS disk and ends EC2 compute charges.
 The instance is not yet a reusable AMI, and its EBS storage still has a small cost
 until the builder is terminated after AMI creation and verification.
+
+## Session — 2026-09-05 (RabbitMQ Golden AMI Finalized)
+
+**`loopback_users` only matters for the `guest` account**
+RabbitMQ's default config restricts the built-in `guest` user to localhost-only
+connections. The Vagrant reference script disables this globally, but VProfile
+never uses `guest` — it authenticates as its own `test` user, which has no such
+restriction by default. *This project:* deliberately skipped the `loopback_users`
+config change on the golden AMI since it wouldn't have changed anything for the
+account we actually use — an explained omission, not a missed step.
+
+**A golden AMI outlives the instance that built it**
+Once `create-image` finishes, the resulting AMI is a fully independent resource —
+terminating the source instance afterward doesn't affect it. *This project:*
+builder `i-0b3d1c51c83caab23` was terminated right after AMI
+`ami-0b553971033842a1d` reached `available`, with zero impact on the AMI itself.
