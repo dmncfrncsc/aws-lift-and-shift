@@ -88,8 +88,19 @@ configuration, then verify the broker again.
 - Verification passed:
   - `systemctl status rabbitmq-server` reported `active (running)`.
   - `rabbitmq-diagnostics ping` returned `Ping succeeded`.
-- Builder is currently `stopped`. Its EBS disk retains the installed software;
-  no custom AMI has been created yet.
+- RabbitMQ was enabled and started with:
+  `systemctl enable --now rabbitmq-server`.
+- Verification passed:
+  - `systemctl status rabbitmq-server` reported `active (running)`.
+  - `rabbitmq-diagnostics ping` returned `Ping succeeded`.
+- RabbitMQ user `test` was created, tagged `administrator`, and granted full
+  permissions (`.*`/`.*`/`.*`) on vhost `/`, matching the reference Vagrant
+  provisioning. Verified via `list_users`, `list_permissions`, and
+  `rabbitmq-diagnostics ping`.
+- Builder stopped, then AMI created: `ami-0b553971033842a1d`
+  ("vprofile-rmq-golden-ami"), confirmed `available`.
+- Builder instance `i-0b3d1c51c83caab23` terminated after AMI verification —
+  no longer needed.
 
 ## Incident #1 — Resolved
 ### Symptom
@@ -157,6 +168,9 @@ private-instance validation.
 - No ALB or NAT Gateway exists.
 - The stopped builder's EBS volume still incurs a small storage charge until the
   builder is terminated after the AMI is confirmed available.
+- `vprofile-ami-builder`: terminated. Its work is preserved in
+  `ami-0b553971033842a1d`.
+- No EC2 instance is currently running for this project.
 
 ## Resource Reference
 VPC:                     vpc-0e686e7841a60b687
@@ -187,7 +201,9 @@ Base AMI:                ami-081b0a6eac00b4f53
 vprofile-db:             i-0d83ac1dfc99bd53c — terminated
 vprofile-mc:             i-05681771c7c2a39a2 — terminated
 vprofile-rmq:            i-039c3b5c85abb9a11 — terminated
-vprofile-ami-builder:    i-0b3d1c51c83caab23 — stopped
+vprofile-ami-builder:    i-0b3d1c51c83caab23 — terminated
+
+Golden AMI (RabbitMQ):   ami-0b553971033842a1d — available
 
 ## Key Decisions
 - Dedicated VPC instead of the default VPC for isolation and networking practice.
@@ -219,18 +235,14 @@ vprofile-ami-builder:    i-0b3d1c51c83caab23 — stopped
   August 15–16. No live resources were found and no active cost was identified.
 
 ## Next Step
-1. Inspect the VProfile source and confirm the required RabbitMQ username,
-   password, permissions, and any required listener configuration.
-2. Start `vprofile-ami-builder` and apply that RabbitMQ configuration manually.
-3. Verify service health and application-specific RabbitMQ settings.
-4. Stop the builder again for a clean snapshot.
-5. Create the custom AMI and wait until it becomes `available`.
-6. Terminate the builder only after the AMI is available.
-7. Launch `vprofile-rmq` privately from the custom AMI.
-8. Verify RabbitMQ end-to-end.
-9. Relaunch and verify Memcached.
-10. Relaunch and verify MariaDB.
-11. Close Phase 2, then begin Phase 3: Tomcat deployment.
+1. Launch `vprofile-rmq` privately from the custom AMI
+   (`ami-0b553971033842a1d`), using the existing `rmq-sg` security group and
+   private subnet.
+2. Verify RabbitMQ end-to-end (service health + the `test` user can actually
+   authenticate).
+3. Relaunch and verify Memcached.
+4. Relaunch and verify MariaDB.
+5. Close Phase 2, then begin Phase 3: Tomcat deployment.
 
 ## Remaining Phases
 - Phase 2: finish Incident #3 and verify DB, Memcached, and RabbitMQ.
