@@ -208,6 +208,13 @@ vprofile-ami-builder:    i-0b3d1c51c83caab23 — stopped
 - Database credentials are currently hardcoded in `mysql.sh` (`admin123`).
   Later decide whether to move them to Secrets Manager or SSM Parameter Store, or
   document this as a deliberate portfolio simplification.
+  - RabbitMQ user `test` (password `test`, from the reference Vagrant provisioning) is granted
+  full admin rights with unrestricted configure/write/read permissions (`.*`/`.*`/`.*`) on the
+  default vhost `/`. Same category of simplification as the hardcoded MariaDB credentials above —
+  fine for a portfolio-scale single-app broker, but not least-privilege. Later decide whether to
+  scope permissions down or document as a deliberate portfolio simplification, same as the DB
+  credentials decision.
+
 - CloudTrail showed unexplained EKS/Auto Scaling `RunInstances` events on
   August 15–16. No live resources were found and no active cost was identified.
 
