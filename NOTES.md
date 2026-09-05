@@ -256,3 +256,42 @@ write-up claimed the test RabbitMQ user was created and verified before the AMI 
 It wasn't — only guest existed on the launched instance. This project: 
 caught via rabbitmqctl list_users on the newly launched vprofile-rmq, not by re-reading the docs. 
 Lesson: documentation records an intended action; only re-checking the actual system confirms it happened.
+
+
+**Bind address vs. security group — two different layers of the same problem**
+Memcached defaults to binding only `127.0.0.1` (localhost) — nothing outside the
+instance can reach it, even over the VPC network, until that's changed. *This
+project:* `memcache.sh` uses `sed` to rewrite the bind address to `0.0.0.0`, then
+`ss -tlnp | grep 11211` confirmed it was actually listening on `0.0.0.0:11211`
+before trusting `systemctl status` alone — a service can report "active" while
+still bound to localhost only. The bind address controls whether the service
+*can* accept outside connections at all; the security group (`mc-sg`, port 11211
+from `app-sg` only) controls *who's allowed to*. Memcached has no built-in
+authentication, so the SG is the only real access boundary — standard for
+Memcached, not a shortcut.
+
+**"Running" isn't "verified" — same lesson, third time**
+Same pattern as RabbitMQ: an EC2 instance reporting `running` only proves the OS
+booted, not that userdata succeeded or the service works correctly. *This
+project:* both Memcached and MariaDB relaunches were checked against
+`cloud-init-output.log` for userdata errors, then service status, then an
+actual functional check (`ss` for Memcached's listen address, `SHOW TABLES` for
+MariaDB's schema import) — the same three-layer verification used for
+RabbitMQ's `test` user.
+
+**Scope-creep vs. a deliberate follow-up item**
+Considered moving DB and RabbitMQ credentials to Secrets Manager/SSM Parameter
+Store during this session, since both were already flagged as hardcoded-password
+Known Issues. Decided against doing it mid-relaunch — it's real, separate work
+(new secret, new IAM policy, script rewrite, new failure surface), not a small
+aside, and bundling it into "verify the DB relaunch" would make it harder to
+tell which part failed if something broke. Logged instead as a deliberate,
+separately-scoped Phase 2 cleanup task — the point being that simplification
+should be an explicit, tracked decision, not something silently deferred and
+forgotten.
+
+**Phase 2 closed — all three backend services verified simultaneously running**
+`vprofile-rmq`, `vprofile-mc`, `vprofile-db` all running at once for the first
+time in this project. Worth noting for cost awareness even though all are
+`t2.micro` — first time observing what full backend-tier compute cost looks
+like before Tomcat/ALB are added in later phases.

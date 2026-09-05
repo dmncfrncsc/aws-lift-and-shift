@@ -10,12 +10,10 @@ full roadmap and project rationale live in the master prompt; this file records
 only the state of this project.
 
 ## Current Phase
-Phase 2 — Backend EC2s.
+Phase 2 — Backend EC2s — ✅ Complete.
 
-The RabbitMQ golden-AMI builder has RabbitMQ installed, enabled, and health-checked.
-It is currently stopped to avoid EC2 compute charges. Before creating the AMI, the
-next session must verify and apply the VProfile-specific RabbitMQ user and permission
-configuration, then verify the broker again.
+All three backend services (RabbitMQ, Memcached, MariaDB) are launched and
+verified running. Ready to begin Phase 3: Tomcat deployment.
 
 ## Completed Work
 
@@ -46,52 +44,62 @@ configuration, then verify the broker again.
   are available.
 - S3 Gateway Endpoint is available for private-subnet S3 access.
 
-### Phase 2 — Backend EC2s 🔄
+### Phase 2 — Backend EC2s ✅
 - Actual AWS userdata scripts live in `~/aws-lift-and-shift/userdata/`, outside
   the forked VProfile repository.
-- `memcache.sh` was reviewed; it has no public-internet dependency beyond
-  Amazon Linux repositories and needs no changes.
-- `rabbitmq.sh` was reviewed and exposed Incident #3: RabbitMQ is not available
-  from Amazon Linux 2023 default repositories.
 - Shared IAM role: `vprofile-ssm-role`.
 - Shared instance profile for Memcached and RabbitMQ:
   `vprofile-ssm-instance-profile`.
 - S3 bucket created: `vprofile-artifacts-747336059892`, with all public access
   blocked.
 - `db/accountsdb.sql` uploaded to the bucket.
-- `vprofile-db` was successfully relaunched and verified after the S3 schema
-  download fix. That test instance was later terminated deliberately.
-- `vprofile-mc` remains terminated and is ready for a fresh launch.
-- `vprofile-rmq` remains terminated and is waiting for the custom RabbitMQ AMI.
 
-#### RabbitMQ golden-AMI builder checkpoint
-- Temporary builder launched: `vprofile-ami-builder`
-  (`i-0b3d1c51c83caab23`).
-- Builder placement: `vprofile-pub-1a`, private IP `172.20.1.42`, shared base
-  AMI `ami-081b0a6eac00b4f53`, instance type `t2.micro`.
-- Builder uses `vprofile-ssm-instance-profile` and a dedicated
-  `vprofile-ami-builder-sg` security group with zero inbound rules.
-- SSM initially failed with `TargetNotConnected`. Private DNS redirected the
-  public-subnet builder to the private SSM VPC endpoints, but `ssm-ep-sg`
-  trusted only the private subnet.
-- Fix applied: added inbound TCP 443 to `ssm-ep-sg`, sourced from
-  `vprofile-ami-builder-sg`, then rebooted the builder. SSM registration became
-  `Online`.
-- Imported RabbitMQ signing keys and added RabbitMQ's official signed
-  repositories for Erlang and RabbitMQ.
-- Installed:
-  - `erlang-27.3.4.16-1.el9`
-  - `rabbitmq-server-4.3.5-1.el8`
-- `logrotate` was already installed.
-- RabbitMQ was enabled and started with:
-  `systemctl enable --now rabbitmq-server`.
-- Verification passed:
-  - `systemctl status rabbitmq-server` reported `active (running)`.
-  - `rabbitmq-diagnostics ping` returned `Ping succeeded`.
-- Builder stopped, then AMI created: `ami-0b553971033842a1d`
-  ("vprofile-rmq-golden-ami"), confirmed `available`.
-- Builder instance `i-0b3d1c51c83caab23` terminated after AMI verification —
-  no longer needed.
+#### RabbitMQ — verified ✅
+- Launched from golden AMI `ami-0b553971033842a1d` into
+  `subnet-0981c879b04c46232` (private), using `rmq-sg` (`sg-0ba3baa7a8a231777`)
+  and `vprofile-ssm-instance-profile`. No userdata needed.
+- Instance: `vprofile-rmq` (`i-0cbe922280b6da712`), running.
+- `systemctl status rabbitmq-server` → `active (running)`.
+- `rabbitmq-diagnostics ping` → `Ping succeeded`.
+- The golden AMI was snapshotted with only the default `guest` user present —
+  the VProfile `test` user was never actually created before the AMI build,
+  despite being previously (incorrectly) recorded as done. Caught via
+  `rabbitmqctl list_users` on this launched instance, not by re-reading
+  `PROGRESS.md`.
+- Fix applied manually on the live instance:
+  `add_user test test` → `set_user_tags test administrator` →
+  `set_permissions -p / test ".*" ".*" ".*"`.
+- Verified: `rabbitmqctl authenticate_user test test` → `Success`.
+- The AMI itself still lacks this config — see Known Issues.
+
+#### Memcached — verified ✅
+- Launched from base AMI `ami-081b0a6eac00b4f53` into
+  `subnet-0981c879b04c46232` (private), using `mc-sg` (`sg-0d5c620face437bfc`)
+  and `vprofile-ssm-instance-profile`.
+- Instance: `vprofile-mc` (`i-0ea6c857a80a4e02d`), running.
+- `userdata/memcache.sh` ran cleanly (confirmed via `cloud-init-output.log`,
+  no errors).
+- `systemctl status memcached` → `active (running)`.
+- `ss -tlnp | grep 11211` confirmed listening on `0.0.0.0:11211` (not
+  `127.0.0.1`), confirming the userdata's bind-address fix
+  (`sed -i 's/127.0.0.1/0.0.0.0/g' /etc/sysconfig/memcached`) took effect.
+- `mc-sg` restricts port 11211 to `app-sg` only — this SG rule is the actual
+  security boundary, since Memcached itself has no built-in authentication.
+
+#### MariaDB — verified ✅
+- Launched from base AMI `ami-081b0a6eac00b4f53` into
+  `subnet-0981c879b04c46232` (private), using `db-sg` (`sg-059fb90eac508a949`)
+  and the dedicated `vprofile-db-instance-profile` (not the shared SSM
+  profile — this instance alone needs S3 read access for the schema file).
+- Instance: `vprofile-db` (`i-0d5f4c4b3a689042a`), running.
+- `userdata/mysql.sh` ran cleanly (confirmed via `cloud-init-output.log`,
+  no errors); this is the Incident #2-fixed version using S3 download instead
+  of GitHub clone.
+- `systemctl status mariadb` → `active (running)`.
+- `mysql -u admin -padmin123 -e "SHOW DATABASES; USE accounts; SHOW TABLES;"`
+  confirmed the `accounts` database exists with tables `role`, `user`,
+  `user_role` — the actual schema-import step that failed in Incident #2 is
+  now confirmed working on this fresh launch.
 
 ## Incident #1 — Resolved
 ### Symptom
@@ -119,9 +127,10 @@ public-internet traffic, not S3 traffic, so the private instance could not reach
    `arn:aws:s3:::vprofile-artifacts-747336059892/db/*`.
 3. Created `vprofile-db-instance-profile`.
 4. Changed `mysql.sh` to download `accountsdb.sql` from S3.
-5. Relaunched and verified MariaDB, the schema import, and the required tables.
+5. Relaunched and verified MariaDB, the schema import, and the required tables
+   (confirmed again on the current `vprofile-db` instance).
 
-## Incident #3 — Open: RabbitMQ Packaging Gap
+## Incident #3 — Resolved: RabbitMQ Packaging Gap
 ### Symptom
 `yum install -y erlang rabbitmq-server` failed because neither package existed in
 Amazon Linux 2023 default repositories.
@@ -159,15 +168,12 @@ running `rabbitmqctl list_users` on the launched instance, not by re-reading
 this config; see Known Issues. Builder terminated.
 
 ## Current State
-- `vprofile-db`: terminated. Its S3 schema-download fix was verified.
-- `vprofile-mc`: terminated. Its script was reviewed and is ready to relaunch.
-- `vprofile-rmq`: running (`i-0cbe922280b6da712`), launched from the golden AMI.
-  RabbitMQ verified end-to-end: service healthy, `test` user created and
-  authenticated successfully. Fix was applied manually to the live instance, not
-  baked into the AMI — see Known Issues.
-- `vprofile-ami-builder`: terminated. Its work is preserved in
-  `ami-0b553971033842a1d`.
-- No EC2 instance is currently running for this project.
+- `vprofile-rmq`: running (`i-0cbe922280b6da712`). Verified end-to-end.
+- `vprofile-mc`: running (`i-0ea6c857a80a4e02d`). Verified end-to-end.
+- `vprofile-db`: running (`i-0d5f4c4b3a689042a`). Verified end-to-end.
+- All three backend instances are running simultaneously — first time this
+  many instances have been up at once in this project. Worth tracking for cost
+  awareness (all `t2.micro`).
 - No ALB or NAT Gateway exists.
 
 ## Resource Reference
@@ -196,8 +202,8 @@ DB instance profile:     vprofile-db-instance-profile
 S3 bucket:               vprofile-artifacts-747336059892
 Base AMI:                ami-081b0a6eac00b4f53
 
-vprofile-db:             i-0d83ac1dfc99bd53c — terminated
-vprofile-mc:             i-05681771c7c2a39a2 — terminated
+vprofile-db:             i-0d5f4c4b3a689042a — running
+vprofile-mc:             i-0ea6c857a80a4e02d — running
 vprofile-rmq:            i-0cbe922280b6da712 — running
 vprofile-ami-builder:    i-0b3d1c51c83caab23 — terminated
 
@@ -216,18 +222,21 @@ Golden AMI (RabbitMQ):   ami-0b553971033842a1d — available
 - Per-instance IAM role when permission needs differ.
 - Golden AMI for RabbitMQ because Amazon Linux 2023 lacks the required packages
   and the project intentionally avoids a NAT Gateway.
-- `t2.micro` retained for builder consistency with existing project instances.
+- `t2.micro` retained across all instances for consistency.
+- Deferred Secrets Manager / SSM Parameter Store migration for DB and RabbitMQ
+  credentials rather than folding it into this relaunch — treated as a
+  deliberate, separately-scoped Phase 2 cleanup task rather than scope creep
+  into an already-proven relaunch.
 
 ## Known Issues
 - Database credentials are currently hardcoded in `mysql.sh` (`admin123`).
-  Later decide whether to move them to Secrets Manager or SSM Parameter Store, or
-  document this as a deliberate portfolio simplification.
+  Flagged as a deliberate portfolio simplification for now; planned follow-up:
+  migrate to Secrets Manager or SSM Parameter Store as a Phase 2 cleanup task.
 - RabbitMQ user `test` (password `test`, from the reference Vagrant provisioning) is granted
   full admin rights with unrestricted configure/write/read permissions (`.*`/`.*`/`.*`) on the
   default vhost `/`. Same category of simplification as the hardcoded MariaDB credentials above —
-  fine for a portfolio-scale single-app broker, but not least-privilege. Later decide whether to
-  scope permissions down or document as a deliberate portfolio simplification, same as the DB
-  credentials decision.
+  fine for a portfolio-scale single-app broker, but not least-privilege. Same planned follow-up
+  as the DB credentials above.
 - CloudTrail showed unexplained EKS/Auto Scaling `RunInstances` events on
   August 15–16. No live resources were found and no active cost was identified.
 - Golden AMI ami-0b553971033842a1d does not include the VProfile test RabbitMQ user — it was missed
@@ -236,16 +245,13 @@ Golden AMI (RabbitMQ):   ami-0b553971033842a1d — available
   The AMI itself still lacks this config and will be corrected when the Packer template is built.
 
 ## Next Step
-1. ~~Launch `vprofile-rmq` privately from the custom AMI~~ — done:
-   `i-0cbe922280b6da712`.
-2. ~~Verify RabbitMQ end-to-end~~ — done: service healthy, `test` user created,
-   tagged, permissioned, and authenticated successfully.
-3. Relaunch and verify Memcached.
-4. Relaunch and verify MariaDB.
-5. Close Phase 2, then begin Phase 3: Tomcat deployment.
+1. ~~Launch and verify RabbitMQ~~ — done.
+2. ~~Launch and verify Memcached~~ — done.
+3. ~~Launch and verify MariaDB~~ — done.
+4. Phase 2 closed. Begin Phase 3: Tomcat EC2 launch, build WAR file, deploy
+   artifact from S3.
 
 ## Remaining Phases
-- Phase 2: finish Incident #3 and verify DB, Memcached, and RabbitMQ.
 - Phase 3: Tomcat EC2, build WAR file, and deploy the artifact from S3.
 - Phase 4: Application Load Balancer and target group.
 - Phase 5: End-to-end validation, documentation, and cleanup.
