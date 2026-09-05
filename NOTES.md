@@ -251,3 +251,8 @@ Once `create-image` finishes, the resulting AMI is a fully independent resource 
 terminating the source instance afterward doesn't affect it. *This project:*
 builder `i-0b3d1c51c83caab23` was terminated right after AMI
 `ami-0b553971033842a1d` reached `available`, with zero impact on the AMI itself.
+"Verified" in PROGRESS.md isn't proof — check the actual resource. The golden AMI's 
+write-up claimed the test RabbitMQ user was created and verified before the AMI snapshot. 
+It wasn't — only guest existed on the launched instance. This project: 
+caught via rabbitmqctl list_users on the newly launched vprofile-rmq, not by re-reading the docs. 
+Lesson: documentation records an intended action; only re-checking the actual system confirms it happened.
