@@ -88,10 +88,6 @@ configuration, then verify the broker again.
 - Verification passed:
   - `systemctl status rabbitmq-server` reported `active (running)`.
   - `rabbitmq-diagnostics ping` returned `Ping succeeded`.
-- RabbitMQ user `test` was created, tagged `administrator`, and granted full
-  permissions (`.*`/`.*`/`.*`) on vhost `/`, matching the reference Vagrant
-  provisioning. Verified via `list_users`, `list_permissions`, and
-  `rabbitmq-diagnostics ping`.
 - Builder stopped, then AMI created: `ami-0b553971033842a1d`
   ("vprofile-rmq-golden-ami"), confirmed `available`.
 - Builder instance `i-0b3d1c51c83caab23` terminated after AMI verification —
@@ -149,13 +145,26 @@ This preserves the no-NAT architecture, gives manual understanding before
 automation, and avoids runtime RabbitMQ installation on the final private instance.
 
 ### Current Status
-Resolved and verified. Golden AMI `ami-0b553971033842a1d` contains RabbitMQ,
-Erlang, and the VProfile-specific user/permissions. Builder terminated.
+Resolved for the packaging gap itself: golden AMI `ami-0b553971033842a1d` contains
+RabbitMQ and Erlang, confirmed via a live launch of `vprofile-rmq`
+(`i-0cbe922280b6da712`) with no userdata/install step needed.
+
+However, this checkpoint was previously recorded as fully verified — including the
+VProfile `test` user/permissions — before that step was actually executed. The AMI
+was snapshotted with only the default `guest` user present. This was caught by
+running `rabbitmqctl list_users` on the launched instance, not by re-reading
+`PROGRESS.md`. The `test` user was then created manually on the live instance
+(`add_user` / `set_user_tags` / `set_permissions`) and confirmed via
+`rabbitmqctl authenticate_user test test` → `Success`. The AMI itself still lacks
+this config; see Known Issues. Builder terminated.
 
 ## Current State
 - `vprofile-db`: terminated. Its S3 schema-download fix was verified.
 - `vprofile-mc`: terminated. Its script was reviewed and is ready to relaunch.
-- `vprofile-rmq`: terminated. It must be relaunched from the custom AMI.
+- `vprofile-rmq`: running (`i-0cbe922280b6da712`), launched from the golden AMI.
+  RabbitMQ verified end-to-end: service healthy, `test` user created and
+  authenticated successfully. Fix was applied manually to the live instance, not
+  baked into the AMI — see Known Issues.
 - `vprofile-ami-builder`: terminated. Its work is preserved in
   `ami-0b553971033842a1d`.
 - No EC2 instance is currently running for this project.
@@ -189,7 +198,7 @@ Base AMI:                ami-081b0a6eac00b4f53
 
 vprofile-db:             i-0d83ac1dfc99bd53c — terminated
 vprofile-mc:             i-05681771c7c2a39a2 — terminated
-vprofile-rmq:            i-039c3b5c85abb9a11 — terminated
+vprofile-rmq:            i-0cbe922280b6da712 — running
 vprofile-ami-builder:    i-0b3d1c51c83caab23 — terminated
 
 Golden AMI (RabbitMQ):   ami-0b553971033842a1d — available
@@ -219,16 +228,18 @@ Golden AMI (RabbitMQ):   ami-0b553971033842a1d — available
   fine for a portfolio-scale single-app broker, but not least-privilege. Later decide whether to
   scope permissions down or document as a deliberate portfolio simplification, same as the DB
   credentials decision.
-
 - CloudTrail showed unexplained EKS/Auto Scaling `RunInstances` events on
   August 15–16. No live resources were found and no active cost was identified.
+- Golden AMI ami-0b553971033842a1d does not include the VProfile test RabbitMQ user — it was missed
+  before the AMI snapshot. The live vprofile-rmq instance has since been patched manually
+  (add_user/set_user_tags/set_permissions, verified via authenticate_user).
+  The AMI itself still lacks this config and will be corrected when the Packer template is built.
 
 ## Next Step
-1. Launch `vprofile-rmq` privately from the custom AMI
-   (`ami-0b553971033842a1d`), using the existing `rmq-sg` security group and
-   private subnet.
-2. Verify RabbitMQ end-to-end (service health + the `test` user can actually
-   authenticate).
+1. ~~Launch `vprofile-rmq` privately from the custom AMI~~ — done:
+   `i-0cbe922280b6da712`.
+2. ~~Verify RabbitMQ end-to-end~~ — done: service healthy, `test` user created,
+   tagged, permissioned, and authenticated successfully.
 3. Relaunch and verify Memcached.
 4. Relaunch and verify MariaDB.
 5. Close Phase 2, then begin Phase 3: Tomcat deployment.
