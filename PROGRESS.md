@@ -10,8 +10,9 @@ full roadmap and project rationale live in the master prompt; this file records
 only the state of this project.
 
 ## Current Phase
-Phase 2 cleanup — Secrets Manager migration — DB side COMPLETE and verified.
-RabbitMQ golden AMI rebuild IN PROGRESS — v4 AMI built with corrected node-name pinning, new instance launched, verification pending at session end.
+Phase 2 cleanup — Secrets Manager migration (DB side) COMPLETE and verified.
+RabbitMQ golden AMI rebuild COMPLETE and verified — v4 AMI (node-name pinned) confirmed working end-to-end on a fresh, untouched launch, zero manual patching required.
+Next: decide on `vprofile-mc`, then resume Phase 3 (Tomcat).
 
 ## Completed Work
 
@@ -164,7 +165,7 @@ the RabbitMQ note above and Known Issues for the AMI-level gap and its fix).
   `i-01ae6e334e08de812` (the stuck/broken launch) and `i-0d5f4c4b3a689042a`
   (the old pre-migration fallback, kept until the new one was verified, now
   superseded).
-- RabbitMQ golden AMI rebuild: v3 attempt (ami-0bae99fa0907e01c5) succeeded at installing RabbitMQ/Erlang via correct *.rabbitmq.com repos (Cloudsmith repos were dead — see Known Issues), but the launched instance couldn't authenticate the baked-in test user. Root cause: RabbitMQ's node identity (rabbit@<hostname>) is hostname-derived, and each EC2 instance gets a unique hostname, so the builder's node identity never matched any future launch — the test user existed but under an unreachable node name. Fixed by pinning NODENAME=rabbit@vprofile-rmq in /etc/rabbitmq/rabbitmq-env.conf on a fresh builder (i-0379cf9a62cddf462), which required adding a 127.0.0.1 vprofile-rmq entry to /etc/hosts first (Erlang's distribution layer does a real DNS-style lookup on the node name even for single-node/non-clustered use). test user created and verified under the pinned name; snapshotted as ami-041192a7315e5625c (v4). New vprofile-rmq (i-083381cc68958e4eb) launched from v4 — verification not yet run before session end.
+- RabbitMQ golden AMI rebuild: COMPLETE. v3 attempt (ami-0bae99fa0907e01c5) succeeded at installing RabbitMQ/Erlang via correct *.rabbitmq.com repos (Cloudsmith repos were dead — see Known Issues), but the launched instance couldn't authenticate the baked-in test user. Root cause: RabbitMQ's node identity (rabbit@<hostname>) is hostname-derived, and each EC2 instance gets a unique hostname, so the builder's node identity never matched any future launch — the test user existed but under an unreachable node name. Fixed by pinning NODENAME=rabbit@vprofile-rmq in /etc/rabbitmq/rabbitmq-env.conf on a fresh builder (i-0379cf9a62cddf462), which required adding a 127.0.0.1 vprofile-rmq entry to /etc/hosts first (Erlang's distribution layer does a real DNS-style lookup on the node name even for single-node/non-clustered use). test user created and verified under the pinned name; snapshotted as ami-041192a7315e5625c (v4). New vprofile-rmq (i-083381cc68958e4eb) launched from v4 and verified end-to-end on 2026-09-07: `systemctl status rabbitmq-server` active/running, `rabbitmq-diagnostics ping` succeeded (addressing `rabbit@vprofile-rmq` by name), `rabbitmqctl authenticate_user test test` succeeded with zero manual patching, and `rabbitmqctl eval 'node().'` confirmed `rabbit@vprofile-rmq` on a genuinely fresh instance. AMI-level fix confirmed working, not just the manually-patched original instance.
 
   v3 builder (i-0379cf9a62cddf462... wait, that's v4's builder — v3's was i-0a63d61b202949913) and both prior vprofile-rmq instances (i-0cbe922280b6da712 original, i-086ef927045148b72 v3-launch) are terminated.
 
@@ -286,7 +287,7 @@ script handled — it silently continued and later failed with
 |---|---|---|
 | `vprofile-db` | `i-0c7f0a845aee0ea20` | running, verified ✅ |
 | `vprofile-mc` | `i-0ea6c857a80a4e02d` | stopped |
-| `vprofile-rmq` (v4) | `i-083381cc68958e4eb` | running — verification pending |
+| `vprofile-rmq` (v4) | `i-083381cc68958e4eb` | running, verified ✅ |
 | `vprofile-rmq-builder-v3` | `i-0a63d61b202949913` | terminated |
 | `vprofile-rmq-builder-v4` | `i-0379cf9a62cddf462` | terminated |
 | `vprofile-rmq` (v3 launch, superseded) | `i-086ef927045148b72` | terminated |
@@ -323,11 +324,13 @@ script handled — it silently continued and later failed with
   above.
 - CloudTrail showed unexplained EKS/Auto Scaling `RunInstances` events on
   August 15–16. No live resources were found and no active cost was identified.
-- Golden AMI `ami-0b553971033842a1d` does not include the VProfile `test`
-  RabbitMQ user — it was missed before the AMI snapshot. The live `vprofile-rmq`
-  instance has since been patched manually (add_user/set_user_tags/
-  set_permissions, verified via `authenticate_user`). The AMI itself still lacks
-  this config and will be corrected when the Packer template is built.
+- (Resolved 2026-09-07) Golden AMI `ami-0b553971033842a1d` (v1) was missing the
+  VProfile `test` RabbitMQ user at snapshot time. Superseded by v4
+  (`ami-041192a7315e5625c`), which bakes in a working `test` user under a
+  pinned node identity (`rabbit@vprofile-rmq`) — confirmed on a fresh launch
+  with zero manual patching. See "RabbitMQ Node-Identity Pinning" in NOTES.md
+  for the root cause (hostname-derived node identity breaks golden AMIs unless
+  pinned).
 - (Resolved 2026-09-07) Secrets Manager connectivity was blocked purely by
   launch-order sequencing (instance launched before the VPC endpoint existed),
   not a persistent networking/IAM issue. See "Secrets Manager Migration" above
@@ -344,10 +347,10 @@ script handled — it silently continued and later failed with
   found.
 
 ## Next Step
-1. Verify new vprofile-rmq (i-083381cc68958e4eb, from ami-041192a7315e5625c) end-to-end: systemctl status rabbitmq-server, rabbitmq-diagnostics ping, rabbitmqctl authenticate_user test test, and rabbitmqctl eval 'node().' (confirm it prints rabbit@vprofile-rmq on a genuinely fresh instance, not just the builder). Commands were issued but output not yet captured.
-2. If verified clean with zero manual patching: RabbitMQ golden AMI work is DONE. Update Known Issues to remove the "test user missing from AMI" entry (superseded) and add the node-name-pinning lesson.
-3. Decide what to do with vprofile-mc (i-0ea6c857a80a4e02d) — still stopped, no changes needed, likely just needs restart + re-verification.
-4. THEN resume Phase 3 (Tomcat).
+1. Decide what to do with vprofile-mc (i-0ea6c857a80a4e02d) — still stopped, no
+   changes needed since Phase 2, likely just needs restart + re-verification
+   (systemctl status, ss -tlnp | grep 11211).
+2. THEN resume Phase 3 (Tomcat).
 
 ## Remaining Phases
 - Phase 3: Tomcat EC2, build WAR file, and deploy the artifact from S3.
