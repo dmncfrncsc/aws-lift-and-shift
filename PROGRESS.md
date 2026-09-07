@@ -11,7 +11,8 @@ only the state of this project.
 
 ## Current Phase
 Phase 2 cleanup — Secrets Manager migration — DB side COMPLETE and verified.
-RabbitMQ golden AMI rebuild not yet started. Not yet in Phase 3.
+RabbitMQ golden AMI rebuild IN PROGRESS (builder launched, mid-diagnosis on
+package installation — see Current State and Next Step). Not yet in Phase 3.
 
 ## Completed Work
 
@@ -164,8 +165,17 @@ the RabbitMQ note above and Known Issues for the AMI-level gap and its fix).
   `i-01ae6e334e08de812` (the stuck/broken launch) and `i-0d5f4c4b3a689042a`
   (the old pre-migration fallback, kept until the new one was verified, now
   superseded).
-- RabbitMQ golden AMI rebuild: NOT STARTED. No longer blocked — the Secrets
-  Manager connectivity issue is resolved. This is now simply the next task.
+- RabbitMQ golden AMI rebuild: IN PROGRESS. Builder instance launched:
+  `vprofile-rmq-builder-v2` (`i-0a63d61b202949913`, t2.micro, public subnet 1a,
+  reusing `vprofile-ami-builder-sg` and `vprofile-rmq-instance-profile` per the
+  "identical permission needs → share the role" rule). Both RabbitMQ repos
+  (erlang, server) installed successfully on the builder, but under corrected
+  URLs — see Known Issues for the Cloudsmith namespace change. `dnf install -y
+  erlang rabbitmq-server` still fails with "No match for argument" despite both
+  repo scripts reporting success — unresolved, mid-diagnosis (checking
+  `dnf repolist all` and per-repo package listings next). Builder instance is
+  running and billable; no packages installed yet, so safe to stop or leave
+  running between sessions with no progress lost.
 
 ## Secrets Manager Migration (in progress this session)
 - Two secrets created, values unchanged from before (deliberate — chose to
@@ -286,6 +296,7 @@ script handled — it silently continued and later failed with
 | `vprofile-mc` | `i-0ea6c857a80a4e02d` | stopped |
 | `vprofile-rmq` (OLD) | `i-0cbe922280b6da712` | stopped |
 | `vprofile-ami-builder` | `i-0b3d1c51c83caab23` | terminated |
+| `vprofile-rmq-builder-v2` | `i-0a63d61b202949913` | running — mid-diagnosis, billable |
 | `vprofile-db` (broken relaunch) | `i-01ae6e334e08de812` | terminated |
 | `vprofile-db` (old, pre-migration) | `i-0d5f4c4b3a689042a` | terminated |
 
@@ -331,17 +342,37 @@ script handled — it silently continued and later failed with
   for full root cause and fix. `mysql.sh` now fails fast instead of silently
   continuing if the secret fetch fails — worth applying the same pattern to
   `rabbitmq.sh` during the upcoming AMI rebuild.
+- Cloudsmith moved both RabbitMQ repo namespaces from `public/rabbitmq/...` to
+  `public/rabbitmq-dev/...` at some point after the original AMI build (old
+  URLs now return 404, confirmed via `curl -w "%{http_code}"`; new URLs return
+  200). If `rabbitmq.sh` still references the old `public/rabbitmq/...` URLs,
+  it needs updating to `public/rabbitmq-dev/...` during this rebuild. Both
+  repos now install successfully under the new URLs, but `dnf install` still
+  can't find the packages afterward — see Current State; root cause not yet
+  found.
 
 ## Next Step
-1. Rebuild RabbitMQ golden AMI using the updated `rabbitmq.sh` (Secrets
-   Manager version) — apply the same fail-fast pattern used in `mysql.sh` for
-   the `RMQ_PASS` fetch while doing this.
-2. Terminate old `vprofile-rmq` (`i-0cbe922280b6da712`), launch new one from
+1. Resume RabbitMQ golden AMI rebuild diagnosis on `i-0a63d61b202949913`:
+   both repos install successfully (using corrected `rabbitmq-dev` namespace
+   URLs — see Known Issues) but `dnf install -y erlang rabbitmq-server` still
+   reports "No match for argument" for both packages. Next diagnostic
+   commands queued but not yet run: `dnf repolist all | grep -i rabbit`, and
+   `dnf list --disablerepo='*' --enablerepo='rabbitmq-dev-rabbitmq-server*'
+   available` (same for the erlang repo) — to confirm the repos are actually
+   enabled/queryable and to see the real package names they expose.
+2. Once packages install: apply the same fail-fast pattern used in `mysql.sh`
+   to the `RMQ_PASS` fetch in `rabbitmq.sh`, enable/verify the service
+   (`rabbitmq-diagnostics ping`), create the `test` user from the Secrets
+   Manager value, verify with `rabbitmqctl authenticate_user` BEFORE
+   snapshotting — do not repeat the earlier mistake of recording this as done
+   before it was actually run.
+3. Stop builder → `create-image` → wait for `available` → terminate builder.
+4. Terminate old `vprofile-rmq` (`i-0cbe922280b6da712`), launch new one from
    the rebuilt AMI, verify (service status, `rabbitmqctl authenticate_user`).
-3. Decide what to do with `vprofile-mc` (`i-0ea6c857a80a4e02d`) — currently
+5. Decide what to do with `vprofile-mc` (`i-0ea6c857a80a4e02d`) — currently
    stopped, no script changes needed this migration; likely just needs a
    restart and re-verification.
-4. THEN resume original Phase 3 (Tomcat) plan.
+6. THEN resume original Phase 3 (Tomcat) plan.
 
 ## Remaining Phases
 - Phase 3: Tomcat EC2, build WAR file, and deploy the artifact from S3.

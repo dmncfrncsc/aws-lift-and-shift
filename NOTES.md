@@ -393,3 +393,29 @@ used to create the admin user. Both prior instances from this migration
 (the stuck launch and the old pre-migration fallback) terminated after
 verification, per the project's "verify before terminating a fallback" pattern
 used earlier for RabbitMQ/Memcached too.
+
+## Session — 2026-09-07 (cont'd — RabbitMQ AMI Rebuild, Cloudsmith URL Drift)
+
+**Third-party repo-setup scripts can move their own URLs without warning**
+The Cloudsmith setup scripts for both `rabbitmq-erlang` and `rabbitmq-server`
+that worked during the original AMI build now 404 at their old URLs
+(`public/rabbitmq/...`). The actual current location is a different namespace
+entirely (`public/rabbitmq-dev/...`) — not a typo or a networking problem, an
+upstream vendor change. *This project:* diagnosed via `curl -w
+"%{http_code}"` instead of relying on the piped `curl | bash` one-liner, which
+fails completely silently (`-f` suppresses the error body) when the URL 404s.
+Worth remembering as an interview example of external dependency drift — a
+frozen "it worked when I built this" script can go stale purely from a
+vendor's side, with zero code change on this project's part.
+
+**A script reporting "success" doesn't mean the thing it configured is usable**
+Both Cloudsmith setup scripts printed their own "installed successfully" green
+checkmark message, repo files were added, GPG keys imported — every visible
+signal said it worked. `dnf install -y erlang rabbitmq-server` still failed
+immediately after with "No match for argument" for both packages. Same
+"reported ≠ verified" pattern as `cloud-init-output.log`/`systemctl status`
+earlier in this project, now showing up in a third-party installer's own
+self-reported status message, not just our own scripts. Diagnosis in
+progress at end of session — checking `dnf repolist all` and directly listing
+each repo's available packages next, rather than assuming the repo names or
+package names guessed from the setup script's own naming convention.
