@@ -295,3 +295,57 @@ forgotten.
 time in this project. Worth noting for cost awareness even though all are
 `t2.micro` — first time observing what full backend-tier compute cost looks
 like before Tomcat/ALB are added in later phases.
+
+## Session — 2026-09-07 (Secrets Manager Migration — Networking Gap)
+
+**IAM permission ≠ network reachability — two separate failure modes that look
+similar at first**
+Granting `secretsmanager:GetSecretValue` in IAM only controls *who's allowed to
+ask*; it says nothing about *whether the request can physically reach the
+service*. This project's db-role could legitimately call Secrets Manager
+(confirmed by the policy being correctly scoped and present) but the private
+subnet had no network path there at all — no NAT Gateway, no VPC endpoint for
+that specific service. The failure mode is also different: an IAM denial fails
+fast with a clear `AccessDenied` error; a missing network path just hangs
+indefinitely with no error at all, until something (a timeout, or cloud-init
+itself) gives up. Blinking cursor / hung command is itself a diagnostic signal
+pointing toward network reachability, not permissions or syntax.
+
+**Different AWS services need different VPC endpoints — S3's endpoint doesn't
+cover Secrets Manager**
+This project already had an S3 Gateway Endpoint (free, route-table-based) and
+three SSM Interface Endpoints. Assuming "we have endpoints, we're fine" was
+wrong — Secrets Manager is a distinct service with its own endpoint
+(`com.amazonaws.us-east-1.secretsmanager`), same Interface-endpoint type and
+cost profile as the SSM ones, but a completely separate resource. Every AWS
+service reached privately needs its own endpoint (or a NAT Gateway covering
+everything generally) — there's no "internet access" as a single on/off switch.
+
+**Diagnosing a hang: isolate each layer instead of guessing**
+When `get-secret-value` hung, the systematic approach was: (1) confirm IAM is
+fine by testing a *different*, already-working call from the same role (S3
+`cp`, which succeeded) — this isolates the problem to Secrets Manager
+specifically, not the role generally; (2) confirm DNS resolves to the expected
+private IP (`nslookup`) rather than a public one; (3) confirm the endpoint
+itself is `available`, in the right subnet, with the right SG attached,
+independent of trusting the create command's own echoed output; (4) confirm
+security group rules in both directions (inbound on the endpoint's SG,
+outbound on the client's SG). Each check ruled out one specific layer without
+assuming the others were fine. Still open at end of session: raw TCP-level
+connectivity and Network ACLs — the next two layers to check, since everything
+checked so far came back clean.
+
+**A "successful" AMI/instance launch doesn't mean userdata actually finished**
+Same lesson as Phase 2, in a new form: the new vprofile-db instance reached
+`running` and even progressed partway through its userdata (packages
+installed, mariadb service created) before silently hanging on the Secrets
+Manager call. `cloud-init-output.log` stopping mid-script, with no further
+output, is the tell — not an error message, just an abrupt stop at the exact
+line before the new (untested-at-the-time) code.
+
+**Session paused near context/usage limit — mid-diagnosis, not mid-implementation**
+Nothing destructive or half-applied is in flight: no resources were left in a
+transitional state, the new db instance's incomplete userdata is a known,
+documented, non-urgent issue (it can simply be relaunched once the network
+issue is fixed). Safe to resume from PROGRESS.md's "Next Step" list without
+replaying this session's diagnostic history.

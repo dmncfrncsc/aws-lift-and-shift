@@ -10,10 +10,8 @@ full roadmap and project rationale live in the master prompt; this file records
 only the state of this project.
 
 ## Current Phase
-Phase 2 — Backend EC2s — ✅ Complete.
-
-All three backend services (RabbitMQ, Memcached, MariaDB) are launched and
-verified running. Ready to begin Phase 3: Tomcat deployment.
+Phase 2 cleanup — Secrets Manager migration — IN PROGRESS (blocked on networking issue).
+Not yet in Phase 3.
 
 ## Completed Work
 
@@ -168,13 +166,46 @@ running `rabbitmqctl list_users` on the launched instance, not by re-reading
 this config; see Known Issues. Builder terminated.
 
 ## Current State
-- `vprofile-rmq`: running (`i-0cbe922280b6da712`). Verified end-to-end.
-- `vprofile-mc`: running (`i-0ea6c857a80a4e02d`). Verified end-to-end.
-- `vprofile-db`: running (`i-0d5f4c4b3a689042a`). Verified end-to-end.
-- All three backend instances are running simultaneously — first time this
-  many instances have been up at once in this project. Worth tracking for cost
-  awareness (all `t2.micro`).
-- No ALB or NAT Gateway exists.
+- Old instances `vprofile-db` (i-0d5f4c4b3a689042a), `vprofile-mc` (i-0ea6c857a80a4e02d),
+  `vprofile-rmq` (i-0cbe922280b6da712) are all STOPPED. This happened on 2026-09-05
+  (confirmed via CloudTrail), NOT during this session, and was previously undocumented —
+  PROGRESS.md incorrectly still said "running." Cause of the Sep 5 stop events not yet
+  investigated; low priority since instances are intact and easily restartable.
+- NEW `vprofile-db` instance launched this session: i-01ae6e334e08de812, running,
+  using updated mysql.sh with Secrets Manager integration. **However, its userdata
+  is STUCK/incomplete** — cloud-init hung indefinitely on the `aws secretsmanager
+  get-secret-value` call (see Known Issues). MariaDB/schema setup did NOT complete.
+  Do not treat this instance as verified/working yet.
+- RabbitMQ golden AMI rebuild: NOT STARTED. Blocked behind resolving the Secrets
+  Manager connectivity issue first, since the rebuild will hit the same problem.
+
+## Secrets Manager Migration (in progress this session)
+- Two secrets created, values unchanged from before (deliberate — chose to relocate
+  credentials, not rotate them):
+  - `vprofile/db/admin-password` (value: admin123)
+    ARN: arn:aws:secretsmanager:us-east-1:747336059892:secret:vprofile/db/admin-password-9mjRxL
+  - `vprofile/rmq/test-password` (value: test)
+    ARN: arn:aws:secretsmanager:us-east-1:747336059892:secret:vprofile/rmq/test-password-onPKEB
+- New IAM role + instance profile: `vprofile-rmq-role` / `vprofile-rmq-instance-profile`
+  (RabbitMQ previously had no dedicated role — rode on the shared SSM profile). Has
+  AmazonSSMManagedInstanceCore + inline policy `vprofile-rmq-secret-read` (scoped to
+  its own secret ARN only).
+- `vprofile-db-role` (existing) got new inline policy `vprofile-db-secret-read`
+  (scoped to its own secret ARN only), alongside its existing `db-s3-read` policy.
+- `userdata/mysql.sh` updated: fetches DB_PASS from Secrets Manager at boot instead
+  of hardcoding admin123. All mysql/mysqladmin calls now use $DB_PASS.
+- `userdata/rabbitmq.sh` rewritten: this file is NOT live userdata (RabbitMQ uses a
+  golden-AMI pattern, no boot-time script runs). Rewritten as an accurate build-reference
+  doc for the next AMI rebuild — removed the actually-nonfunctional `yum install
+  erlang rabbitmq-server` line (fails per Incident #3), added a header clarifying its
+  real purpose, and updated `add_user` to pull RMQ_PASS from Secrets Manager.
+- ADR-lite decision (not yet written to a formal decision log, capture here for now):
+  chose Secrets Manager over Parameter Store despite near-zero cost difference (~$1/mo),
+  because Secrets Manager is the correct category fit for credentials (vs. Parameter
+  Store's config-focused design) even though rotation — its main differentiator — isn't
+  used yet. Kept current password values as-is rather than rotating, since Option A
+  (full clean relaunch) made rotation low-risk but out of today's approved scope.
+
 
 ## Resource Reference
 VPC:                     vpc-0e686e7841a60b687
@@ -208,6 +239,18 @@ vprofile-rmq:            i-0cbe922280b6da712 — running
 vprofile-ami-builder:    i-0b3d1c51c83caab23 — terminated
 
 Golden AMI (RabbitMQ):   ami-0b553971033842a1d — available
+
+DB:  arn:aws:secretsmanager:us-east-1:747336059892:secret:vprofile/db/admin-password-9mjRxL
+RMQ: arn:aws:secretsmanager:us-east-1:747336059892:secret:vprofile/rmq/test-password-onPKEB
+
+vprofile-secretsmgr-ep-sg:  sg-0b61cd7e69844f147
+Secrets Manager endpoint:   vpce-0ebdbcb485fe2ea67
+vprofile-rmq-role:          (new)
+vprofile-rmq-instance-profile: (new)
+vprofile-db (NEW, unverified): i-01ae6e334e08de812 — running, userdata incomplete
+vprofile-db (OLD):           i-0d5f4c4b3a689042a — stopped, do not terminate yet
+vprofile-mc:                 i-0ea6c857a80a4e02d — stopped
+vprofile-rmq (OLD):          i-0cbe922280b6da712 — stopped
 
 ## Key Decisions
 - Dedicated VPC instead of the default VPC for isolation and networking practice.
@@ -243,13 +286,46 @@ Golden AMI (RabbitMQ):   ami-0b553971033842a1d — available
   before the AMI snapshot. The live vprofile-rmq instance has since been patched manually
   (add_user/set_user_tags/set_permissions, verified via authenticate_user).
   The AMI itself still lacks this config and will be corrected when the Packer template is built.
+- **BLOCKING**: Private-subnet instances (db, and future rmq) cannot reach AWS
+  Secrets Manager despite: correct IAM (confirmed working — S3 fetch from the same
+  role succeeds), a newly-created Secrets Manager VPC Interface Endpoint
+  (`vpce-0ebdbcb485fe2ea67`, state `available`, private DNS enabled, correct subnet
+  `subnet-0981c879b04c46232`), a new security group (`vprofile-secretsmgr-ep-sg`,
+  `sg-0b61cd7e69844f147`) with inbound 443 from both `db-sg` and `rmq-sg`, and
+  confirmed wide-open egress on `db-sg`. DNS resolves `secretsmanager.us-east-1
+  .amazonaws.com` correctly to the endpoint's private IP (172.20.3.127, in-VPC).
+  `timeout 10 aws secretsmanager get-secret-value ...` still times out (exit 124)
+  from inside the vprofile-db instance (i-01ae6e334e08de812) even after the endpoint
+  was created and confirmed available.
+  **Ruled out so far:** IAM/permissions (S3 works via same role), DNS resolution
+  (resolves correctly to private IP), endpoint placement (correct subnet/SG),
+  db-sg egress (wide open, default).
+  **Not yet checked:** raw TCP connectivity to the endpoint IP on 443 (bypassing
+  DNS/SDK entirely, via /dev/tcp), and Network ACLs on the private subnet (NACLs
+  are stateless and subnet-level — a return-traffic block there would produce
+  exactly this "connects but times out" symptom). These are the next two things
+  to check when resuming.
+- New `vprofile-db` instance (i-01ae6e334e08de812) has an incomplete/stuck userdata
+  run — MariaDB installed but user/password/schema setup did not complete. Will
+  need re-verification (or a fresh relaunch) once the connectivity issue is fixed.
 
-## Next Step
-1. ~~Launch and verify RabbitMQ~~ — done.
-2. ~~Launch and verify Memcached~~ — done.
-3. ~~Launch and verify MariaDB~~ — done.
-4. Phase 2 closed. Begin Phase 3: Tomcat EC2 launch, build WAR file, deploy
-   artifact from S3.
+
+## Next Step (updated)
+1. Diagnose remaining Secrets Manager connectivity gap: raw TCP test
+   (`/dev/tcp/172.20.3.127/443`) from vprofile-db, then check Network ACLs on
+   `subnet-0981c879b04c46232`.
+2. Once fixed: re-verify new vprofile-db (i-01ae6e334e08de812) end-to-end
+   (mariadb service, schema import, admin user auth via fetched secret).
+3. Terminate OLD vprofile-db (i-0d5f4c4b3a689042a) once new one is verified.
+4. Rebuild RabbitMQ golden AMI with updated rabbitmq.sh steps (Secrets Manager
+   version) — this was the original reason for touching RabbitMQ at all.
+5. Terminate old vprofile-rmq, launch new one from new AMI, verify.
+6. Decide what to do with vprofile-mc — currently stopped with no relaunch
+   planned; likely just needs a restart (no script changes were made for
+   Memcached in this session).
+7. THEN resume original Phase 3 (Tomcat) plan.
+
+
 
 ## Remaining Phases
 - Phase 3: Tomcat EC2, build WAR file, and deploy the artifact from S3.
