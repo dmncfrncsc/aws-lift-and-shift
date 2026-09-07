@@ -10,9 +10,10 @@ full roadmap and project rationale live in the master prompt; this file records
 only the state of this project.
 
 ## Current Phase
-Phase 2 cleanup — Secrets Manager migration (DB side) COMPLETE and verified.
-RabbitMQ golden AMI rebuild COMPLETE and verified — v4 AMI (node-name pinned) confirmed working end-to-end on a fresh, untouched launch, zero manual patching required.
-Next: decide on `vprofile-mc`, then resume Phase 3 (Tomcat).
+Phase 2 fully closed — all three backend services (`vprofile-db`, `vprofile-rmq`, `vprofile-mc`)
+verified running simultaneously. Session ended with stop commands issued for all three (not yet
+confirmed — verify state at start of next session before trusting this).
+Next: begin Phase 3 (Tomcat) — scoped but not yet implemented.
 
 ## Completed Work
 
@@ -155,12 +156,12 @@ VProfile `test` user/permissions — before that step was actually executed (see
 the RabbitMQ note above and Known Issues for the AMI-level gap and its fix).
 
 ## Current State
-- `vprofile-mc` (`i-0ea6c857a80a4e02d`) and `vprofile-rmq` (`i-0cbe922280b6da712`)
-  remain **STOPPED**, unchanged this session.
-- `vprofile-db` is now `i-0c7f0a845aee0ea20` — **launched and fully verified this
-  session** (2026-09-07). Root cause of the prior blocking issue found and fixed
-  (see "Secrets Manager Migration" below); service, schema, and admin auth all
-  confirmed working end-to-end.
+- `vprofile-mc` (`i-0ea6c857a80a4e02d`) — restarted after being stopped since Phase 2, re-verified
+  2026-09-08: `systemctl status memcached` → `active (running)`, `ss -tlnp | grep 11211` confirmed
+  listening on `0.0.0.0:11211` (bind-address fix survived the stop/start cycle, no drift).
+- `vprofile-db` (`i-0c7f0a845aee0ea20`), `vprofile-rmq` v4 (`i-083381cc68958e4eb`), and
+  `vprofile-mc` (`i-0ea6c857a80a4e02d`) — **stop-instances command issued for all three at session
+  end (2026-09-08); not yet confirmed stopped. Verify actual state before assuming.**
 - Both prior `vprofile-db` instances from this migration are terminated:
   `i-01ae6e334e08de812` (the stuck/broken launch) and `i-0d5f4c4b3a689042a`
   (the old pre-migration fallback, kept until the new one was verified, now
@@ -285,9 +286,9 @@ script handled — it silently continued and later failed with
 ### EC2 Instances (current state)
 | Instance | Instance ID | Status |
 |---|---|---|
-| `vprofile-db` | `i-0c7f0a845aee0ea20` | running, verified ✅ |
-| `vprofile-mc` | `i-0ea6c857a80a4e02d` | stopped |
-| `vprofile-rmq` (v4) | `i-083381cc68958e4eb` | running, verified ✅ |
+| `vprofile-db` | `i-0c7f0a845aee0ea20` | stop pending (unconfirmed) ⚠️ |
+| `vprofile-mc` | `i-0ea6c857a80a4e02d` | stop pending (unconfirmed) ⚠️ |
+| `vprofile-rmq` (v4) | `i-083381cc68958e4eb` | stop pending (unconfirmed) ⚠️ |
 | `vprofile-rmq-builder-v3` | `i-0a63d61b202949913` | terminated |
 | `vprofile-rmq-builder-v4` | `i-0379cf9a62cddf462` | terminated |
 | `vprofile-rmq` (v3 launch, superseded) | `i-086ef927045148b72` | terminated |
@@ -347,10 +348,12 @@ script handled — it silently continued and later failed with
   found.
 
 ## Next Step
-1. Decide what to do with vprofile-mc (i-0ea6c857a80a4e02d) — still stopped, no
-   changes needed since Phase 2, likely just needs restart + re-verification
-   (systemctl status, ss -tlnp | grep 11211).
-2. THEN resume Phase 3 (Tomcat).
+1. Verify all three instances actually reached `stopped` (stop command was issued but not confirmed
+   before session end).
+2. Begin Phase 3 (Tomcat): EC2 instance in the private subnet, WAR file build/deploy, Tomcat
+   listening on 8080, verified via internal curl (no ALB yet — that's Phase 4). Not yet scoped in
+   detail (SG rules, IAM role, build-vs-deploy approach) — pick up from the intro framing at the
+   end of the 2026-09-08 session.
 
 ## Remaining Phases
 - Phase 3: Tomcat EC2, build WAR file, and deploy the artifact from S3.
