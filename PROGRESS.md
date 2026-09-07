@@ -11,8 +11,7 @@ only the state of this project.
 
 ## Current Phase
 Phase 2 cleanup — Secrets Manager migration — DB side COMPLETE and verified.
-RabbitMQ golden AMI rebuild IN PROGRESS (builder launched, mid-diagnosis on
-package installation — see Current State and Next Step). Not yet in Phase 3.
+RabbitMQ golden AMI rebuild IN PROGRESS — v4 AMI built with corrected node-name pinning, new instance launched, verification pending at session end.
 
 ## Completed Work
 
@@ -165,17 +164,9 @@ the RabbitMQ note above and Known Issues for the AMI-level gap and its fix).
   `i-01ae6e334e08de812` (the stuck/broken launch) and `i-0d5f4c4b3a689042a`
   (the old pre-migration fallback, kept until the new one was verified, now
   superseded).
-- RabbitMQ golden AMI rebuild: IN PROGRESS. Builder instance launched:
-  `vprofile-rmq-builder-v2` (`i-0a63d61b202949913`, t2.micro, public subnet 1a,
-  reusing `vprofile-ami-builder-sg` and `vprofile-rmq-instance-profile` per the
-  "identical permission needs → share the role" rule). Both RabbitMQ repos
-  (erlang, server) installed successfully on the builder, but under corrected
-  URLs — see Known Issues for the Cloudsmith namespace change. `dnf install -y
-  erlang rabbitmq-server` still fails with "No match for argument" despite both
-  repo scripts reporting success — unresolved, mid-diagnosis (checking
-  `dnf repolist all` and per-repo package listings next). Builder instance is
-  running and billable; no packages installed yet, so safe to stop or leave
-  running between sessions with no progress lost.
+- RabbitMQ golden AMI rebuild: v3 attempt (ami-0bae99fa0907e01c5) succeeded at installing RabbitMQ/Erlang via correct *.rabbitmq.com repos (Cloudsmith repos were dead — see Known Issues), but the launched instance couldn't authenticate the baked-in test user. Root cause: RabbitMQ's node identity (rabbit@<hostname>) is hostname-derived, and each EC2 instance gets a unique hostname, so the builder's node identity never matched any future launch — the test user existed but under an unreachable node name. Fixed by pinning NODENAME=rabbit@vprofile-rmq in /etc/rabbitmq/rabbitmq-env.conf on a fresh builder (i-0379cf9a62cddf462), which required adding a 127.0.0.1 vprofile-rmq entry to /etc/hosts first (Erlang's distribution layer does a real DNS-style lookup on the node name even for single-node/non-clustered use). test user created and verified under the pinned name; snapshotted as ami-041192a7315e5625c (v4). New vprofile-rmq (i-083381cc68958e4eb) launched from v4 — verification not yet run before session end.
+
+  v3 builder (i-0379cf9a62cddf462... wait, that's v4's builder — v3's was i-0a63d61b202949913) and both prior vprofile-rmq instances (i-0cbe922280b6da712 original, i-086ef927045148b72 v3-launch) are terminated.
 
 ## Secrets Manager Migration (in progress this session)
 - Two secrets created, values unchanged from before (deliberate — chose to
@@ -281,7 +272,8 @@ script handled — it silently continued and later failed with
 |---|---|
 | S3 bucket | `vprofile-artifacts-747336059892` |
 | Base AMI | `ami-081b0a6eac00b4f53` |
-| Golden AMI (RabbitMQ) | `ami-0b553971033842a1d` — available |
+| Golden AMI (RabbitMQ v3, superseded) | `ami-0bae99fa0907e01c5` — superseded/unused |
+| Golden AMI (RabbitMQ v4, node-name pinned) | `ami-041192a7315e5625c` — available, in use |
 
 ### Secrets
 | Secret | ARN |
@@ -294,11 +286,11 @@ script handled — it silently continued and later failed with
 |---|---|---|
 | `vprofile-db` | `i-0c7f0a845aee0ea20` | running, verified ✅ |
 | `vprofile-mc` | `i-0ea6c857a80a4e02d` | stopped |
-| `vprofile-rmq` (OLD) | `i-0cbe922280b6da712` | stopped |
-| `vprofile-ami-builder` | `i-0b3d1c51c83caab23` | terminated |
-| `vprofile-rmq-builder-v2` | `i-0a63d61b202949913` | running — mid-diagnosis, billable |
-| `vprofile-db` (broken relaunch) | `i-01ae6e334e08de812` | terminated |
-| `vprofile-db` (old, pre-migration) | `i-0d5f4c4b3a689042a` | terminated |
+| `vprofile-rmq` (v4) | `i-083381cc68958e4eb` | running — verification pending |
+| `vprofile-rmq-builder-v3` | `i-0a63d61b202949913` | terminated |
+| `vprofile-rmq-builder-v4` | `i-0379cf9a62cddf462` | terminated |
+| `vprofile-rmq` (v3 launch, superseded) | `i-086ef927045148b72` | terminated |
+| `vprofile-rmq` (original golden AMI) | `i-0cbe922280b6da712` | terminated |
 
 ## Key Decisions
 - Dedicated VPC instead of the default VPC for isolation and networking practice.
@@ -352,27 +344,10 @@ script handled — it silently continued and later failed with
   found.
 
 ## Next Step
-1. Resume RabbitMQ golden AMI rebuild diagnosis on `i-0a63d61b202949913`:
-   both repos install successfully (using corrected `rabbitmq-dev` namespace
-   URLs — see Known Issues) but `dnf install -y erlang rabbitmq-server` still
-   reports "No match for argument" for both packages. Next diagnostic
-   commands queued but not yet run: `dnf repolist all | grep -i rabbit`, and
-   `dnf list --disablerepo='*' --enablerepo='rabbitmq-dev-rabbitmq-server*'
-   available` (same for the erlang repo) — to confirm the repos are actually
-   enabled/queryable and to see the real package names they expose.
-2. Once packages install: apply the same fail-fast pattern used in `mysql.sh`
-   to the `RMQ_PASS` fetch in `rabbitmq.sh`, enable/verify the service
-   (`rabbitmq-diagnostics ping`), create the `test` user from the Secrets
-   Manager value, verify with `rabbitmqctl authenticate_user` BEFORE
-   snapshotting — do not repeat the earlier mistake of recording this as done
-   before it was actually run.
-3. Stop builder → `create-image` → wait for `available` → terminate builder.
-4. Terminate old `vprofile-rmq` (`i-0cbe922280b6da712`), launch new one from
-   the rebuilt AMI, verify (service status, `rabbitmqctl authenticate_user`).
-5. Decide what to do with `vprofile-mc` (`i-0ea6c857a80a4e02d`) — currently
-   stopped, no script changes needed this migration; likely just needs a
-   restart and re-verification.
-6. THEN resume original Phase 3 (Tomcat) plan.
+1. Verify new vprofile-rmq (i-083381cc68958e4eb, from ami-041192a7315e5625c) end-to-end: systemctl status rabbitmq-server, rabbitmq-diagnostics ping, rabbitmqctl authenticate_user test test, and rabbitmqctl eval 'node().' (confirm it prints rabbit@vprofile-rmq on a genuinely fresh instance, not just the builder). Commands were issued but output not yet captured.
+2. If verified clean with zero manual patching: RabbitMQ golden AMI work is DONE. Update Known Issues to remove the "test user missing from AMI" entry (superseded) and add the node-name-pinning lesson.
+3. Decide what to do with vprofile-mc (i-0ea6c857a80a4e02d) — still stopped, no changes needed, likely just needs restart + re-verification.
+4. THEN resume Phase 3 (Tomcat).
 
 ## Remaining Phases
 - Phase 3: Tomcat EC2, build WAR file, and deploy the artifact from S3.

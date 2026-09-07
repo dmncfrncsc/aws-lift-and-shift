@@ -419,3 +419,32 @@ self-reported status message, not just our own scripts. Diagnosis in
 progress at end of session — checking `dnf repolist all` and directly listing
 each repo's available packages next, rather than assuming the repo names or
 package names guessed from the setup script's own naming convention.
+
+## Session — 2026-09-07 (cont'd — RabbitMQ Node-Identity Pinning)
+
+**RabbitMQ's node identity is hostname-derived, and that breaks golden AMIs**
+RabbitMQ nodes identify themselves as `rabbit@<hostname>` by default. All
+per-node data — including users — lives under a directory keyed to that name.
+*This project:* the v3 golden AMI baked in a `test` user under
+`rabbit@ip-172-20-1-52` (the builder's hostname). Every EC2 instance gets its
+own unique hostname, so the next launch came up as a different node identity,
+found no matching data directory, and silently initialized fresh — `test` was
+simply gone, no error, just `guest` again.
+
+**Fix: pin the node name explicitly, but that introduces a DNS-shaped requirement**
+Setting `NODENAME=rabbit@vprofile-rmq` in `/etc/rabbitmq/rabbitmq-env.conf`
+makes every instance from the AMI use the same fixed identity. But Erlang's
+distribution layer actually resolves the node name's host part over the
+network stack, even for a single, non-clustered node — pinning the name
+without anything able to resolve it produced an `epmd_error ... nxdomain`
+on startup. Fix: add `127.0.0.1 vprofile-rmq` to `/etc/hosts` before first
+start, so the name resolves locally. This `/etc/hosts` entry is part of the
+AMI snapshot too, so it carries to every future launch — correct, since we
+only need loopback resolution, not real network identity.
+
+**Lesson for golden AMIs generally**
+Anything an application derives from machine identity at first run (hostname,
+generated node names, machine IDs) is a landmine for golden AMIs — the value
+gets baked in from the builder's identity, not the eventual instance's. Worth
+checking for this class of issue before snapshotting, not after a failed
+relaunch.
