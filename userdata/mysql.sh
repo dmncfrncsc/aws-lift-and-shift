@@ -5,6 +5,10 @@ yum install -y mariadb105-server git zip unzip
 systemctl start mariadb
 systemctl enable mariadb
 DB_PASS=$(aws secretsmanager get-secret-value --secret-id vprofile/db/admin-password --query SecretString --output text)
+if [ -z "$DB_PASS" ]; then
+  echo "FATAL: Failed to retrieve DB_PASS from Secrets Manager" >&2
+  exit 1
+fi
 mysqladmin -u root password "$DB_PASS"
 mysql -u root -p"$DB_PASS" <<SQLEOF
 CREATE DATABASE IF NOT EXISTS accounts;

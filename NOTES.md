@@ -349,3 +349,47 @@ transitional state, the new db instance's incomplete userdata is a known,
 documented, non-urgent issue (it can simply be relaunched once the network
 issue is fixed). Safe to resume from PROGRESS.md's "Next Step" list without
 replaying this session's diagnostic history.
+
+
+## Session — 2026-09-07 (cont'd — Secrets Manager Root Cause Found & DB Migration Verified)
+
+**Isolating "network path" from "AWS CLI's own request flow" as separate diagnostic layers**
+After ruling out IAM, DNS, SG, and endpoint config in the prior session, this
+session tested progressively higher layers: raw TCP connect (`/dev/tcp` to the
+endpoint IP) succeeded instantly; a verbose `curl` completed a full TLS
+handshake and got a real HTTP response (`404 UnknownOperationException` —
+Secrets Manager's own expected reply to an unspecified action, not an error);
+an IMDS credential check got an instant `401` (expected for IMDSv2 without a
+token, but proves IMDS itself is reachable and fast). All four layers came
+back clean — meaning the block wasn't in networking at all, it had to be in
+timing/sequencing instead.
+
+**Comparing timestamps confirmed a race, not a residual network fault**
+Instance launch time (`06:10:18`) vs. Secrets Manager VPC endpoint creation
+time (`06:21:28`) — an 11-minute gap, with the instance launched *first*.
+Userdata runs once at boot, so it tried to reach an endpoint that plainly
+didn't exist yet. This explains why every individual network check came back
+fine when tested manually later: by the time anyone checks by hand, the race
+is long over. Lesson: a "successful" endpoint creation later doesn't mean it
+existed when something *earlier* tried to use it — check creation order, not
+just current state, when a timing-sensitive dependency is involved.
+
+**Fail-fast beats silent continuation, even for "it'll probably work" calls**
+`mysql.sh` had no error check after the `DB_PASS=$(aws secretsmanager ...)`
+line. When that call timed out, the script kept going anyway — running
+`mysqladmin` with an effectively blank password, which cascaded into a much
+more confusing downstream error (`Unknown database 'accounts'`) that looked
+unrelated to its actual cause. Added an explicit `if [ -z "$DB_PASS" ]; then
+exit 1; fi` check right after the fetch. Small change, meaningfully better
+diagnosability if this ever happens again — the log would say exactly what
+failed, immediately, instead of failing confusingly three steps later.
+
+**DB-side Secrets Manager migration verified end-to-end**
+New `vprofile-db` (`i-0c7f0a845aee0ea20`) launched after the endpoint existed;
+`cloud-init-output.log` clean, `mariadb.service` active, `accounts` DB present
+with all three expected tables, and login as `admin`/`admin123` succeeded —
+confirming the Secrets Manager-fetched password actually matched what was
+used to create the admin user. Both prior instances from this migration
+(the stuck launch and the old pre-migration fallback) terminated after
+verification, per the project's "verify before terminating a fallback" pattern
+used earlier for RabbitMQ/Memcached too.
