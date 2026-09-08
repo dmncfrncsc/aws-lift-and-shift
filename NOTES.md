@@ -448,3 +448,113 @@ generated node names, machine IDs) is a landmine for golden AMIs — the value
 gets baked in from the builder's identity, not the eventual instance's. Worth
 checking for this class of issue before snapshotting, not after a failed
 relaunch.
+
+## Session — 2026-09-08 (cont'd — Phase 3 Tomcat Setup)
+
+**WAR file (Web Application Archive)**
+The compiled, deployable form of a Java web app — a zip file with a specific
+structure that Tomcat knows how to unpack and serve. Built with `mvn package`.
+*This project:* `vprofile-v2.war` built locally, uploaded to
+`s3://vprofile-artifacts-747336059892/app/vprofile-v2.war`.
+
+**WAR "explosion"**
+Tomcat automatically unzips ("explodes") a `.war` file into a real folder on
+first start. `ROOT.war` → `webapps/ROOT/`. Needed before we can write the
+override `application.properties` into `webapps/ROOT/WEB-INF/classes/`.
+
+**Spring Boot config override**
+If an `application.properties` exists at `webapps/ROOT/WEB-INF/classes/`, it
+overrides the one baked into the WAR at build time. *This project:* used to
+inject real credentials (from Secrets Manager) and real backend IPs (from
+describe-instances) without rebuilding the WAR.
+
+**systemd service file**
+A file that tells Linux how to manage a background process — how to start it,
+stop it, restart it on crash, and when to launch it at boot. *This project:*
+`/etc/systemd/system/tomcat.service` runs Tomcat as the non-root `tomcat` user,
+restarts automatically on crash (`Restart=always`), and starts after the network
+is up (`After=network.target`).
+
+**`set -e` in bash scripts**
+Makes the entire script exit immediately if any command fails — a blanket
+fail-fast that catches errors at the actual failure point instead of letting
+broken state cascade into confusing downstream errors. Applied to `tomcat.sh`.
+
+## Session — 2026-09-08 (cont'd — Tomcat Script Finalized & Instance Launched)
+
+**A missing shebang is an easy, silent mistake when copy-pasting scripts**
+Manually stitching a script together in Notepad dropped the `#!/bin/bash` line entirely — the
+script still looked complete and `bash -n` doesn't catch this (it's not a syntax error, just a
+missing hint about which interpreter to use). *This project:* caught by asking to see the actual
+saved file rather than trusting "I stitched it together" — same "verify the real file, not the
+described one" principle already applied to PROGRESS.md edits.
+
+**Two different "empty" cases for AWS CLI `--query` output**
+A truly blank string and the literal text `"None"` are both possible "not found" results from
+`describe-instances --query`, and they need separate checks (`-z "$VAR"` catches blank; `"$VAR" ==
+"None"` catches the no-match case) — a single check misses one of them. *This project:* used for
+all three backend IP lookups in `tomcat.sh`, filtered additionally by
+`instance-state-name=running` so old terminated instances with the same Name tag can't match.
+
+**Reference-script package names don't carry over between Linux distributions**
+The Vagrant `tomcat.sh` used `java-17-openjdk` — correct for its original distro, but AL2023 only
+ships Java as Amazon Corretto (`java-17-amazon-corretto`), confirmed via AWS's own Corretto docs
+before trusting the reference script's naming. Same lesson as the Cloudsmith RabbitMQ URLs and the
+AL2023 `dnf`-vs-package-availability gap — each reference script's assumptions get re-verified per
+project, not copy-pasted on faith.
+
+**"Trust but verify" caught nothing this time — and that's still worth confirming**
+Re-checked `vprofile-app-role`, its instance profile, and `vprofile-app-sg` against live AWS state
+before building on top of them, even though `PROGRESS.md` already recorded them as done. Unlike the
+RabbitMQ `test`-user incident, this time the documented state matched reality exactly. Worth noting
+that the verification habit doesn't only exist to catch drift — confirming *no* drift is also a
+valid, useful outcome, not wasted effort.
+
+## Session — 2026-09-08 (cont'd — Phase 3 Tomcat Boot Failures, Two New Endpoint Gaps)
+
+**Every AWS service needs its own VPC endpoint — reinforced a third time**
+
+First S3, then Secrets Manager, now the general EC2 API all turned out to need their own separate endpoint. This project: ec2messages (already present for SSM Session Manager) looked like it might cover general EC2 API calls (describe-instances) — it doesn't. Same name prefix, completely unrelated service. tomcat.sh's IP-lookup step needed a dedicated com.amazonaws.us-east-1.ec2 endpoint that never existed until this session.
+
+**A security group built for one consumer doesn't automatically cover a new one**
+
+vprofile-secretsmgr-ep-sg was created back when only db/rmq called Secrets Manager. When vprofile-app became a third caller in Phase 3, nothing updated that SG automatically — it silently blocked the new consumer with the exact same "connect timeout, no error message" symptom as a missing endpoint entirely. Lesson: adding a new consumer of an existing shared resource (endpoint, SG, IAM role) means re-checking whether that resource's access rules were scoped to the old set of consumers only.
+
+**"Deployed" and "started successfully" are different claims for a WAR**
+
+Tomcat's own log showed Deployment of web application archive [...] has finished — meaning the WAR was correctly exploded into ROOT/. But right above that same log block was SEVERE ... Context [] startup failed due to previous errors, caused by Spring failing to resolve ${jdbc.driverClassName} — an unfilled config placeholder. A 404 on curl didn't mean "nothing was deployed" like I first assumed from timestamps alone; it meant "deployed, but the app crashed on startup before it could serve anything." journalctl (Tomcat's systemd-captured output) was the log that actually showed this — catalina.out doesn't exist for a systemd-managed Tomcat; its stdout/stderr goes to the journal instead.
+
+**Tomcat under systemd doesn't use catalina.out**
+
+Expected Tomcat's traditional log file at $CATALINA_HOME/logs/catalina.out — it didn't exist. Under systemd, Tomcat's stdout/stderr is captured by the journal instead. sudo journalctl -u tomcat --no-pager is the correct way to see Tomcat's own startup/deployment messages when it's managed this way, not the log file.
+
+## Session — 2026-09-08 (cont'd — Spring Placeholder Cascade Resolved)
+
+**Spring resolves ALL `@Value` placeholders at startup, not lazily per feature**
+A missing config key doesn't just break the feature that uses it — it fails the entire app's
+context initialization, even for a feature this project never uses (Elasticsearch, a real
+memcached standby). *This project:* three separate missing keys
+(`jdbc.driverClassName`, `memcached.standBy.*`, `elasticsearch.*`) each independently crashed
+Tomcat on startup, one revealed per restart, because Spring tries to wire every bean's
+properties up front rather than only when that code path is hit. Useful diagnostic corollary:
+once a startup log shows zero `SEVERE` entries, every `@Value` in the app resolved
+successfully — a strong (not just circumstantial) signal that no more missing keys remain,
+without needing to separately diff the source config.
+
+**Reference-project config sometimes contains dead/unused blocks that still must be present**
+VProfile's original `application.properties` includes an Elasticsearch block and a memcached
+"standby" host, from features the reference app supports but this project's architecture never
+implements. *This project:* rather than building a real ES cluster or a second Memcached
+instance, the fix was adding the same dummy placeholder values the reference project itself
+ships with (`elasticsearch.host=192.168.1.85`, `memcached.standBy.host=127.0.0.2`) — Spring only
+needs the property to resolve to *something*, not to a reachable service, unless that feature
+is actually exercised at runtime.
+
+**A trimmed AL2023 install can lack tools you'd assume are always present**
+Neither `unzip` nor `jar` was available on `vprofile-app` — `unzip` was deliberately removed
+from `tomcat.sh` earlier as unused, and `java-17-amazon-corretto` turned out not to include the
+full JDK's `jar` tool. *This project:* rather than installing either just for a one-off
+verification read, judged the check unnecessary once the clean startup log already gave
+equivalent proof (see placeholder-resolution note above) — a good example of stopping a
+diagnostic path once its marginal value drops below its cost, rather than continuing on
+momentum.
