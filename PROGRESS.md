@@ -11,11 +11,13 @@ only the state of this project.
 
 ## Current Phase
 Phase 5 (validation, documentation, cleanup) — IN PROGRESS. Phase 4 (ALB) is COMPLETE and
-verified as described below. Phase 5 docs drafted this session: `docs/incidents.md` (7-incident
-engineering log) and `docs/decisions.md` (11-entry ADR-lite log) — reported moved into the repo
-and committed by the student; not independently re-verified by the mentor this session. Remaining
-Phase 5 work: architecture diagram (Mermaid), Course Coverage Matrix, cleanup/shutdown, README
-(deliberately last — synthesizes the other docs instead of being drafted twice).
+verified as described below. The four EC2 instances (`vprofile-db`, `vprofile-mc`, `vprofile-rmq`
+v4, and `vprofile-app`) were confirmed `stopped` via `describe-instances` this session. Phase 5
+docs `docs/incidents.md` (7-incident engineering log) and `docs/decisions.md` (11-entry ADR-lite
+log) are still not independently verified in the correct portfolio repository. The initial
+Phase 5 architecture approach is agreed: two Mermaid diagrams (network/security and request-flow).
+Remaining Phase 5 work: verify the correct repo/docs state, add/verify the architecture diagrams,
+Course Coverage Matrix, cleanup/ALB shutdown, and README last (synthesizing the other docs).
 
 ## Completed Work
 
@@ -434,14 +436,14 @@ script handled — it silently continued and later failed with
 ### EC2 Instances (current state)
 | Instance | Instance ID | Status |
 |---|---|---|
-| `vprofile-db` | `i-0c7f0a845aee0ea20` | stop-instances issued 2026-09-08 Phase 5 session; not re-verified via describe-instances in-chat — confirm actual state next session |
-| `vprofile-mc` | `i-0ea6c857a80a4e02d` | stop-instances issued 2026-09-08 Phase 5 session; not re-verified via describe-instances in-chat — confirm actual state next session |
-| `vprofile-rmq` (v4) | `i-083381cc68958e4eb` | stop-instances issued 2026-09-08 Phase 5 session; not re-verified via describe-instances in-chat — confirm actual state next session |
+| `vprofile-db` | `i-0c7f0a845aee0ea20` | stopped — verified via `describe-instances` in Phase 5 session |
+| `vprofile-mc` | `i-0ea6c857a80a4e02d` | stopped — verified via `describe-instances` in Phase 5 session |
+| `vprofile-rmq` (v4) | `i-083381cc68958e4eb` | stopped — verified via `describe-instances` in Phase 5 session |
 | `vprofile-rmq-builder-v3` | `i-0a63d61b202949913` | terminated |
 | `vprofile-rmq-builder-v4` | `i-0379cf9a62cddf462` | terminated |
 | `vprofile-rmq` (v3 launch, superseded) | `i-086ef927045148b72` | terminated |
 | `vprofile-rmq` (original golden AMI) | `i-0cbe922280b6da712` | terminated |
-| `vprofile-app` | `i-00e2cb29243a3fb05` | stop-instances issued 2026-09-08 Phase 5 session; not re-verified via describe-instances in-chat — confirm actual state next session |
+| `vprofile-app` | `i-00e2cb29243a3fb05` | stopped — verified via `describe-instances` in Phase 5 session |
 
 ## Key Decisions
 - Dedicated VPC instead of the default VPC for isolation and networking practice.
@@ -519,20 +521,22 @@ script handled — it silently continued and later failed with
   of issue as the earlier `file://` userdata problem — a third documented Git-Bash-on-Windows gotcha.
 
 ## Next Step
-1. Confirm the four EC2 instances actually reached `stopped` (stop was issued but not
-   re-verified via `describe-instances` in this session).
-2. Confirm `docs/incidents.md` and `docs/decisions.md` are actually committed
-   (`git log --oneline -2`).
-3. Continue Phase 5: architecture diagram (Mermaid) next, then Course Coverage Matrix, then
-   README last.
-4. ALB (`vprofile-alb`) was left active/billing this session — no change made. Revisit
-   deletion once Phase 5 docs are done (approval-gated, destructive-ish action).
+1. Verify the correct outer portfolio repo (`~/aws-lift-and-shift`) state: confirm `docs/incidents.md`
+   and `docs/decisions.md` exist and are committed (`git -C ~/aws-lift-and-shift status`,
+   `git -C ~/aws-lift-and-shift log --oneline -5`, and `ls ~/aws-lift-and-shift/docs/`).
+2. Continue Phase 5 architecture documentation using the agreed two-diagram approach: network/security
+   architecture and request-flow/application architecture (Mermaid). Verify the diagrams render cleanly
+   before committing them.
+3. Build the Course Coverage Matrix after the architecture documentation, then complete the README last.
+4. The four EC2 instances are now confirmed `stopped`. ALB (`vprofile-alb`) was left active/billing
+   this session — no change made. Revisit deletion after the Phase 5 documentation is complete
+   (approval-gated, destructive-ish action).
 
 ## Remaining Phases
 - Phase 3: Tomcat EC2 — COMPLETE. `vprofile-app` verified serving the app on port 8080.
 - Phase 4: Application Load Balancer and target group — COMPLETE. `vprofile-alb` verified
   serving the app end-to-end.
-- Phase 5: End-to-end validation, documentation, and cleanup. (Next)
+- Phase 5: End-to-end validation, documentation, and cleanup — IN PROGRESS.
 
 ## Notes
 See `NOTES.md` for chronological study notes and session checkpoints.
