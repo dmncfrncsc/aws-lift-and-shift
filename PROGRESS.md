@@ -10,12 +10,12 @@ full roadmap and project rationale live in the master prompt; this file records
 only the state of this project.
 
 ## Current Phase
-Phase 3 (Tomcat) — COMPLETE and verified. vprofile-app (i-00e2cb29243a3fb05) serves the real
-VProfile login page: `curl -I localhost:8080` returns `200`, clean `journalctl` startup with
-zero SEVERE errors. Root cause of the earlier 404 was three sequential missing Spring config
-placeholders in tomcat.sh's override heredoc (jdbc.driverClassName, memcached standby pair,
-full elasticsearch block) — see Incident #5. Fix applied live via SSM, verified, then ported
-into tomcat.sh and committed. Next: Phase 4 (ALB).
+Phase 5 (validation, documentation, cleanup) — IN PROGRESS. Phase 4 (ALB) is COMPLETE and
+verified as described below. Phase 5 docs drafted this session: `docs/incidents.md` (7-incident
+engineering log) and `docs/decisions.md` (11-entry ADR-lite log) — reported moved into the repo
+and committed by the student; not independently re-verified by the mentor this session. Remaining
+Phase 5 work: architecture diagram (Mermaid), Course Coverage Matrix, cleanup/shutdown, README
+(deliberately last — synthesizes the other docs instead of being drafted twice).
 
 ## Completed Work
 
@@ -235,7 +235,7 @@ these three did.
   superseded).
 - RabbitMQ golden AMI rebuild: COMPLETE. v3 attempt (ami-0bae99fa0907e01c5) succeeded at installing RabbitMQ/Erlang via correct *.rabbitmq.com repos (Cloudsmith repos were dead — see Known Issues), but the launched instance couldn't authenticate the baked-in test user. Root cause: RabbitMQ's node identity (rabbit@<hostname>) is hostname-derived, and each EC2 instance gets a unique hostname, so the builder's node identity never matched any future launch — the test user existed but under an unreachable node name. Fixed by pinning NODENAME=rabbit@vprofile-rmq in /etc/rabbitmq/rabbitmq-env.conf on a fresh builder (i-0379cf9a62cddf462), which required adding a 127.0.0.1 vprofile-rmq entry to /etc/hosts first (Erlang's distribution layer does a real DNS-style lookup on the node name even for single-node/non-clustered use). test user created and verified under the pinned name; snapshotted as ami-041192a7315e5625c (v4). New vprofile-rmq (i-083381cc68958e4eb) launched from v4 and verified end-to-end on 2026-09-07: `systemctl status rabbitmq-server` active/running, `rabbitmq-diagnostics ping` succeeded (addressing `rabbit@vprofile-rmq` by name), `rabbitmqctl authenticate_user test test` succeeded with zero manual patching, and `rabbitmqctl eval 'node().'` confirmed `rabbit@vprofile-rmq` on a genuinely fresh instance. AMI-level fix confirmed working, not just the manually-patched original instance.
 
-  v3 builder (i-0379cf9a62cddf462... wait, that's v4's builder — v3's was i-0a63d61b202949913) and both prior vprofile-rmq instances (i-0cbe922280b6da712 original, i-086ef927045148b72 v3-launch) are terminated.
+  v3 builder (`i-0a63d61b202949913`) and both prior vprofile-rmq instances (`i-0cbe922280b6da712` original, `i-086ef927045148b72` v3-launch) are terminated.
 
 ### Phase 3 — In Progress
 - IAM: `vprofile-app-role` created with four policies (SSM baseline, scoped S3
@@ -276,6 +276,37 @@ these three did.
   Current Phase. Launched via `--user-data "$(cat ~/aws-lift-and-shift/userdata/tomcat.sh)"`
   (not `file://` — known Git Bash issue from 2026-09-04 session). State was `pending` at launch;
   NOT yet confirmed `running` or functional — next session must verify before assuming success.
+
+### Phase 4 — Application Load Balancer ✅
+- `alb-sg` (`sg-04dcbc6c37a127962`) already had the correct inbound rule (TCP 80 from
+  `0.0.0.0/0`) pre-provisioned from Phase 1 — discovered when `authorize-security-group-ingress`
+  returned `InvalidPermission.Duplicate`. Verified via `describe-security-groups`: exactly one
+  rule, matching what Phase 4 needed. No change made.
+- Verified health-check path before configuring anything: `curl -I localhost:8080/login`
+  returned `405 Method Not Allowed` (POST-only, it's the form-submission endpoint, not a page).
+  Used `/` instead, which had already returned a clean `200` in Phase 3 verification.
+- Target group created: `vprofile-app-tg`
+  (`arn:aws:elasticloadbalancing:us-east-1:747336059892:targetgroup/vprofile-app-tg/810a9f8873f9910b`) —
+  HTTP, port 8080, target type `instance`, health check path `/`, matcher `200`.
+- `vprofile-app` (`i-00e2cb29243a3fb05`) registered as a target on port 8080. Initially showed
+  `unused` (`Target.NotInUse`) since no listener existed yet — expected, not an error.
+- ALB created: `vprofile-alb`
+  (`arn:aws:elasticloadbalancing:us-east-1:747336059892:loadbalancer/app/vprofile-alb/0be0c8202f2798af`) —
+  internet-facing, spans both public subnets (`subnet-03510c2b0ab2a8d18` / `subnet-0416352cf44e6f091`),
+  `alb-sg` attached. DNS name: `vprofile-alb-932338318.us-east-1.elb.amazonaws.com`.
+- Listener created: HTTP:80 → forward to `vprofile-app-tg`. Once attached, target health flipped
+  from `unused` to `healthy`.
+- End-to-end verification: `curl -I http://vprofile-alb-932338318.us-east-1.elb.amazonaws.com`
+  returned `200`, `Content-Length: 7935` — identical to the direct `localhost:8080` response,
+  confirming real app content is flowing through the full ALB → target group → app path.
+- No HTTPS/ACM — named simplification (no custom domain to validate a cert against). To be
+  called out explicitly in the README as a production gap, not a silent omission.
+- Before this phase's implementation, all four instances (`vprofile-db`, `vprofile-mc`,
+  `vprofile-rmq`, `vprofile-app`) were restarted from their previously-stopped state (private
+  IPs unchanged, confirmed via `describe-instances`) and re-verified healthy — `vprofile-app`'s
+  `journalctl -u tomcat -b` showed zero `SEVERE` entries on the current boot (old `SEVERE` entries
+  from an earlier boot today were still present in full `journalctl` history but correctly
+  excluded by `-b`).
 
 ## Secrets Manager Migration
 - Two secrets created, values unchanged from before (deliberate — chose to
@@ -393,17 +424,24 @@ script handled — it silently continued and later failed with
 | DB admin password | `arn:aws:secretsmanager:us-east-1:747336059892:secret:vprofile/db/admin-password-9mjRxL` |
 | RMQ test password | `arn:aws:secretsmanager:us-east-1:747336059892:secret:vprofile/rmq/test-password-onPKEB` |
 
+### Load Balancing
+| Resource | ARN / Value |
+|---|---|
+| Target group (`vprofile-app-tg`) | `arn:aws:elasticloadbalancing:us-east-1:747336059892:targetgroup/vprofile-app-tg/810a9f8873f9910b` |
+| ALB (`vprofile-alb`) | `arn:aws:elasticloadbalancing:us-east-1:747336059892:loadbalancer/app/vprofile-alb/0be0c8202f2798af` |
+| ALB DNS name | `vprofile-alb-932338318.us-east-1.elb.amazonaws.com` |
+
 ### EC2 Instances (current state)
 | Instance | Instance ID | Status |
 |---|---|---|
-| `vprofile-db` | `i-0c7f0a845aee0ea20` | running (restarted 2026-09-08, this session) |
-| `vprofile-mc` | `i-0ea6c857a80a4e02d` | running (restarted 2026-09-08, this session) |
-| `vprofile-rmq` (v4) | `i-083381cc68958e4eb` | running (restarted 2026-09-08, this session) |
+| `vprofile-db` | `i-0c7f0a845aee0ea20` | stop-instances issued 2026-09-08 Phase 5 session; not re-verified via describe-instances in-chat — confirm actual state next session |
+| `vprofile-mc` | `i-0ea6c857a80a4e02d` | stop-instances issued 2026-09-08 Phase 5 session; not re-verified via describe-instances in-chat — confirm actual state next session |
+| `vprofile-rmq` (v4) | `i-083381cc68958e4eb` | stop-instances issued 2026-09-08 Phase 5 session; not re-verified via describe-instances in-chat — confirm actual state next session |
 | `vprofile-rmq-builder-v3` | `i-0a63d61b202949913` | terminated |
 | `vprofile-rmq-builder-v4` | `i-0379cf9a62cddf462` | terminated |
 | `vprofile-rmq` (v3 launch, superseded) | `i-086ef927045148b72` | terminated |
 | `vprofile-rmq` (original golden AMI) | `i-0cbe922280b6da712` | terminated |
-| `vprofile-app` | `i-00e2cb29243a3fb05` | running (Tomcat verified healthy, 2026-09-08) |
+| `vprofile-app` | `i-00e2cb29243a3fb05` | stop-instances issued 2026-09-08 Phase 5 session; not re-verified via describe-instances in-chat — confirm actual state next session |
 
 ## Key Decisions
 - Dedicated VPC instead of the default VPC for isolation and networking practice.
@@ -475,17 +513,26 @@ script handled — it silently continued and later failed with
 
 - Tomcat service discovery trade-off (`ec2:DescribeInstances` vs Route 53 / Cloud Map,
   and README TODO) — see Key Decisions — Phase 3 service discovery for full rationale.
+- Git Bash / MSYS path auto-translation: `--health-check-path /` was silently rewritten to
+  `C:/Program Files/Git/` before reaching the AWS CLI, causing a confusing `ValidationError`.
+  Fix: prefix the command with `MSYS_NO_PATHCONV=1` (scoped to that one invocation). Same family
+  of issue as the earlier `file://` userdata problem — a third documented Git-Bash-on-Windows gotcha.
 
 ## Next Step
-1. Begin Phase 4 planning: Application Load Balancer + target group in front of vprofile-app.
-2. Before starting Phase 4 implementation, decide whether to leave all four backend instances
-   running for continuity or stop them at session end per the shutdown checklist — no AWS
-   resources are mid-change right now, so either is safe.
+1. Confirm the four EC2 instances actually reached `stopped` (stop was issued but not
+   re-verified via `describe-instances` in this session).
+2. Confirm `docs/incidents.md` and `docs/decisions.md` are actually committed
+   (`git log --oneline -2`).
+3. Continue Phase 5: architecture diagram (Mermaid) next, then Course Coverage Matrix, then
+   README last.
+4. ALB (`vprofile-alb`) was left active/billing this session — no change made. Revisit
+   deletion once Phase 5 docs are done (approval-gated, destructive-ish action).
 
 ## Remaining Phases
 - Phase 3: Tomcat EC2 — COMPLETE. `vprofile-app` verified serving the app on port 8080.
-- Phase 4: Application Load Balancer and target group. (Next)
-- Phase 5: End-to-end validation, documentation, and cleanup.
+- Phase 4: Application Load Balancer and target group — COMPLETE. `vprofile-alb` verified
+  serving the app end-to-end.
+- Phase 5: End-to-end validation, documentation, and cleanup. (Next)
 
 ## Notes
 See `NOTES.md` for chronological study notes and session checkpoints.

@@ -558,3 +558,50 @@ verification read, judged the check unnecessary once the clean startup log alrea
 equivalent proof (see placeholder-resolution note above) — a good example of stopping a
 diagnostic path once its marginal value drops below its cost, rather than continuing on
 momentum.
+
+## Session — 2026-09-08 (cont'd — Phase 4 ALB)
+
+**Target group is a separate resource from the load balancer, on purpose**
+The ALB only knows "receive on port X, forward to target group Y" — it doesn't hold health-check
+config or the list of instances itself. That separation is what lets one ALB route to multiple
+target groups later (blue/green, path-based routing) without this project needing any of that
+now. *This project:* `vprofile-app-tg` exists independently and briefly sat in an `unused` state
+(`Target.NotInUse`) after registering `vprofile-app` but before a listener existed — expected,
+not a bug: health checks only start once a listener actually attaches the target group to traffic.
+
+**HEAD, GET, and POST can each get a different answer from the same URL**
+`curl -I` sends a `HEAD` request. `/login` returned `405 Method Not Allowed, Allow: POST` for
+both `HEAD` and an explicit `GET` — it's the form-submission endpoint, not the page that displays
+the login form. Used `/` for the ALB health check instead, which had already proven itself with a
+plain `200` back in Phase 3. Lesson: an endpoint's name (`/login`) doesn't tell you which HTTP
+method it actually accepts — worth testing directly rather than assuming.
+
+**A third Git-Bash-on-Windows path-translation gotcha: `MSYS_NO_PATHCONV`**
+`--health-check-path /` was silently rewritten to `C:/Program Files/Git/` by Git Bash's MSYS
+layer before AWS CLI ever saw it — same root cause family as the earlier `file://` userdata
+issue (Git Bash assuming any Unix-looking path argument needs Windows translation, even when
+it's just a plain string flag value). Fix: prefix the single command with `MSYS_NO_PATHCONV=1`,
+scoped to that invocation only, rather than disabling path conversion globally (which could break
+other commands that genuinely need it).
+
+**`0.0.0.0/0` is correct here, not a shortcut**
+Opening `alb-sg` to all inbound IPv4 on port 80 looks alarming in isolation, but it's the
+intended design: the ALB is the one deliberately public-facing resource in this architecture,
+and the actual access boundary is one layer further in — `app-sg` still only accepts port 8080
+from `alb-sg` specifically, not from the internet. Public exposure is funneled through a single,
+narrow, audited entry point rather than removed entirely (which isn't possible for a public
+website anyway).
+
+**`journalctl` without `-b` shows every boot's history, not just the current one**
+Right after restarting `vprofile-app`, `journalctl -u tomcat | grep -i severe` returned several
+old `SEVERE` entries — all timestamped hours earlier, from an interrupted boot during Phase 3's
+Incident #5 troubleshooting. They weren't wrong, just stale: `journalctl -u tomcat -b` (current
+boot only) came back empty, confirming the *current* startup was actually clean. Comparing
+timestamps against `systemctl status`'s "Active since" line is one way to catch this; `-b` is the
+more direct fix.
+
+**End-to-end verification means checking the same fact two different ways**
+`curl -I localhost:8080` (direct, from inside the instance) and
+`curl -I http://vprofile-alb-...elb.amazonaws.com` (through the ALB, from outside) returned
+identical `Content-Length: 7935` — that specific match is what actually proves the ALB is serving
+real app content end-to-end, not just returning *some* `200` from a misconfigured default.
