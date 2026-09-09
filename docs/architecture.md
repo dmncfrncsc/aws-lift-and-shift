@@ -20,14 +20,8 @@ flowchart TB
 
     subgraph VPC["VPC — vprofile-vpc (172.20.0.0/16)"]
         IGW["Internet Gateway"]
-
-        subgraph PubA["Public Subnet 1a — 172.20.1.0/24 (us-east-1a)"]
-            ALB["ALB — vprofile-alb\nsg: alb-sg\n0.0.0.0/0 → :80"]
-        end
-
-        subgraph PubB["Public Subnet 1b — 172.20.2.0/24 (us-east-1b)"]
-            ALB
-        end
+        ALB["ALB — vprofile-alb (spans both public subnets)\nsg: alb-sg\n0.0.0.0/0 → :80"]
+        RT["Public Route Table\n0.0.0.0/0 → IGW"]
 
         subgraph PrivA["Private Subnet 1a — 172.20.3.0/24 (us-east-1a)"]
             APP["EC2: vprofile-app\nsg: app-sg\n:8080 ← alb-sg"]
@@ -44,8 +38,7 @@ flowchart TB
             end
         end
 
-        RT["Public Route Table\n0.0.0.0/0 → IGW"]
-        MAINRT["Main Route Table\n(S3 prefix → S3 Gateway Endpoint)"]
+        MAINRT["Main Route Table\nS3 prefix → S3 Gateway Endpoint"]
     end
 
     S3EP[("S3 Gateway Endpoint\n(free, route-table based)")]
@@ -75,10 +68,13 @@ flowchart TB
     APP -.->|"via S3 Gateway Endpoint\n(WAR, Tomcat tarball)"| S3EP
     S3EP -.-> S3
 
+    RT -.->|"routes"| IGW
+    MAINRT -.->|"routes"| S3EP
+
     classDef public fill:#fde8e8,stroke:#c0392b
     classDef private fill:#e8f0fe,stroke:#2c5fa8
     classDef svc fill:#eafaf1,stroke:#1e8449
-    class PubA,PubB,ALB public
+    class ALB public
     class PrivA,APP,DB,MC,RMQ,Endpoints,EP_SSM,EP_SSMMSG,EP_EC2MSG,EP_SECRETS,EP_EC2API private
     class S3,S3EP,SM svc
 ```
@@ -120,8 +116,8 @@ sequenceDiagram
     SM-->>APP: password values
     APP->>S3: fetch WAR / Tomcat tarball
     S3-->>APP: artifact contents
-    APP->>APP: describe-instances (EC2 API)\nresolve current private IPs of db/mc/rmq
-    APP->>APP: write application.properties\n(real DB/RMQ IPs + credentials)
+    APP->>APP: describe-instances (EC2 API)<br/>resolve current private IPs of db/mc/rmq
+    APP->>APP: write application.properties<br/>(real DB/RMQ IPs + credentials)
 
     Note over C,RMQ: Runtime — serving a request
     C->>ALB: HTTP GET /  (port 80)
