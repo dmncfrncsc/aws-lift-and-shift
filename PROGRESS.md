@@ -10,12 +10,10 @@ full roadmap and project rationale live in the master prompt; this file records
 only the state of this project.
 
 ## Current Phase
-Phase 5 (validation, documentation, cleanup) — IN PROGRESS, nearly complete. Phase 4 (ALB) is
-COMPLETE. Phase 5 docs are all verified and committed to the correct repo: `docs/incidents.md`,
-`docs/decisions.md`, `docs/architecture.md` (two Mermaid diagrams, rendering verified in
-mermaid.live and GitHub preview), and `docs/course-coverage.md`. Billable-resource cleanup is
-COMPLETE — see "Cleanup" below. Only remaining Phase 5 work: write the README (deliberately last,
-synthesizing the other docs).
+Project 1 is COMPLETE. Phase 5 (validation, documentation, cleanup) is complete: all supporting
+docs were verified and committed, the README was written last as the synthesis document, the
+README was pushed to GitHub, both Mermaid diagrams were checked in the pushed README, and the
+billable-resource cleanup was completed — see "Cleanup" below.
 
 ## Completed Work
 
@@ -403,6 +401,12 @@ will reproduce the exact SSM/Secrets Manager/EC2-API connectivity failures docum
 Incidents #1 and #4 — expected, not a regression. Recreating them is a known, already-documented
 set of CLI commands, not new work.
 
+## Project Closure Checkpoint — 2026-09-09 ✅
+Final portfolio documentation checkpoint completed after README push and GitHub verification.
+The README records the architecture, key decisions, incidents, course coverage, and the fact that
+the ALB/endpoints used for the live validation were later deleted. This is documentation of a
+verified project state, not a claim that the original demo endpoint remains available.
+
 ## Resource Reference
 
 ### Networking
@@ -555,19 +559,37 @@ set of CLI commands, not new work.
   Fix: prefix the command with `MSYS_NO_PATHCONV=1` (scoped to that one invocation). Same family
   of issue as the earlier `file://` userdata problem — a third documented Git-Bash-on-Windows gotcha.
 
+## Definition of Done — Project 1 ✅
+Project 1 (`aws-lift-and-shift`) is closed out.
+
+- Phase 3: Tomcat EC2 — COMPLETE. `vprofile-app` was verified serving the app on port 8080.
+- Phase 4: Application Load Balancer and target group — COMPLETE. `vprofile-alb` was verified
+  serving the app end-to-end before cleanup.
+- Phase 5: End-to-end validation, documentation, and cleanup — COMPLETE.
+- `docs/incidents.md`, `docs/decisions.md`, `docs/architecture.md`, and
+  `docs/course-coverage.md` were completed and committed.
+- `README.md` was written as the final synthesis of the project documentation, committed at the
+  repository root, and pushed.
+- Both Mermaid diagrams in the README were confirmed rendering correctly on GitHub after the push.
+- Billable resources were cleaned up after the verification evidence was captured. The historical
+  ALB DNS name and live ALB endpoints are no longer active; the cleanup state is documented above.
+- The remaining stopped EC2 instances, working RabbitMQ v4 AMI, project VPC/networking components,
+  S3 artifact bucket, and two Secrets Manager secrets are intentionally retained as documented
+  rebuild/demo assets and cost trade-offs.
+
+The project's evidence is preserved in `PROGRESS.md`, `NOTES.md`, `docs/`, and the repository
+history. No claim is being made that the deleted ALB or endpoints remain live.
+
 ## Next Step
-1. Write the README last, synthesizing `docs/incidents.md`, `docs/decisions.md`,
-   `docs/architecture.md`, and `docs/course-coverage.md` rather than duplicating their content.
-   This is the final Phase 5 deliverable and, once done, the Definition of Done for this project.
-2. All billable resources beyond the stopped EC2 instances and the two Secrets Manager secrets
-   have been deleted — see "Cleanup" above. No further cost-control action needed unless the
-   project is resumed for a live demo.
+Move to Project 2: `iac-terraform-ansible`, following the Portfolio Plan's recommended sequence.
+Treat `aws-lift-and-shift` as closed unless a future portfolio revision explicitly calls for
+revisiting it.
 
 ## Remaining Phases
-- Phase 3: Tomcat EC2 — COMPLETE. `vprofile-app` verified serving the app on port 8080.
-- Phase 4: Application Load Balancer and target group — COMPLETE. `vprofile-alb` verified
-  serving the app end-to-end.
-- Phase 5: End-to-end validation, documentation, and cleanup — IN PROGRESS (only README remaining).
+- Phase 3: Tomcat EC2 — COMPLETE. `vprofile-app` was verified serving the app on port 8080.
+- Phase 4: Application Load Balancer and target group — COMPLETE. `vprofile-alb` was verified
+  serving the app end-to-end before cleanup.
+- Phase 5: End-to-end validation, documentation, and cleanup — COMPLETE.
 
 ## Notes
 See `NOTES.md` for chronological study notes and session checkpoints.
