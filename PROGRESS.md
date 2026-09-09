@@ -10,14 +10,12 @@ full roadmap and project rationale live in the master prompt; this file records
 only the state of this project.
 
 ## Current Phase
-Phase 5 (validation, documentation, cleanup) — IN PROGRESS. Phase 4 (ALB) is COMPLETE and
-verified as described below. The four EC2 instances (`vprofile-db`, `vprofile-mc`, `vprofile-rmq`
-v4, and `vprofile-app`) were confirmed `stopped` via `describe-instances` this session. Phase 5
-docs `docs/incidents.md` (7-incident engineering log) and `docs/decisions.md` (11-entry ADR-lite
-log) are still not independently verified in the correct portfolio repository. The initial
-Phase 5 architecture approach is agreed: two Mermaid diagrams (network/security and request-flow).
-Remaining Phase 5 work: verify the correct repo/docs state, add/verify the architecture diagrams,
-Course Coverage Matrix, cleanup/ALB shutdown, and README last (synthesizing the other docs).
+Phase 5 (validation, documentation, cleanup) — IN PROGRESS, nearly complete. Phase 4 (ALB) is
+COMPLETE. Phase 5 docs are all verified and committed to the correct repo: `docs/incidents.md`,
+`docs/decisions.md`, `docs/architecture.md` (two Mermaid diagrams, rendering verified in
+mermaid.live and GitHub preview), and `docs/course-coverage.md`. Billable-resource cleanup is
+COMPLETE — see "Cleanup" below. Only remaining Phase 5 work: write the README (deliberately last,
+synthesizing the other docs).
 
 ## Completed Work
 
@@ -368,6 +366,43 @@ script handled — it silently continued and later failed with
 4. Terminated the old pre-migration fallback instance (`i-0d5f4c4b3a689042a`)
    now that the new one is verified.
 
+## Cleanup — 2026-09-09
+
+Billable, easily-reproducible resources were deleted to stop ongoing charges once Phase 5
+documentation had already captured all the verification evidence needed (screenshots, curl
+output, health-check transitions) — deleting the live resources does not erase that evidence,
+it's already recorded in PROGRESS.md/NOTES.md/docs/. Confirmed via AWS Cost Explorer that VPC
+(Interface Endpoints) was the dominant cost driver this month (~$5.05 of $5.77 total spend),
+consistent with the $0.01/hr-per-AZ-per-endpoint rate across all five Interface Endpoints.
+
+Deleted and verified gone:
+- ALB `vprofile-alb` and target group `vprofile-app-tg` — deleted via `delete-load-balancer` /
+  `delete-target-group`, confirmed via `LoadBalancerNotFound` / `TargetGroupNotFound`.
+- All five Interface VPC Endpoints (`ssm`, `ssmmessages`, `ec2messages`, `secretsmanager`,
+  `ec2` API) — deleted via a single `delete-vpc-endpoints` call, confirmed transitioning to
+  `deleting` via `describe-vpc-endpoints`.
+- Superseded RabbitMQ golden AMI v3 (`ami-0bae99fa0907e01c5`) and its backing snapshot
+  (`snap-00241076b1f543e59`) — fully replaced by v4, zero remaining value. Deregistered, then
+  snapshot deleted, confirmed via empty `describe-images` result and `InvalidSnapshot.NotFound`.
+
+Kept (low/no cost, meaningful rebuild effort if lost):
+- Four EC2 instances (`vprofile-db`, `vprofile-mc`, `vprofile-rmq` v4, `vprofile-app`) — remain
+  `stopped`, not terminated. Stopped-instance EBS storage cost is minimal (~$0.60–0.80/month
+  each); terminating and relaunching would mean re-running userdata and re-verifying each
+  service from scratch, the same work already documented in Incidents #1–#5.
+- RabbitMQ golden AMI v4 (`ami-041192a7315e5625c`) — the working, verified image.
+- VPC, subnets, route tables, security groups, IAM roles/instance profiles — free.
+- S3 bucket `vprofile-artifacts-747336059892` — negligible storage cost, holds required
+  artifacts (WAR, Tomcat tarball, DB schema).
+- Two Secrets Manager secrets — ~$0.40/month each (~$0.80/month combined) regardless of use;
+  known small recurring cost, not worth deleting while the project isn't fully torn down.
+
+**Known trade-off if this project is resumed for a live demo:** the five VPC endpoints and the
+ALB no longer exist. Restarting the stopped EC2 instances without first recreating the endpoints
+will reproduce the exact SSM/Secrets Manager/EC2-API connectivity failures documented in
+Incidents #1 and #4 — expected, not a regression. Recreating them is a known, already-documented
+set of CLI commands, not new work.
+
 ## Resource Reference
 
 ### Networking
@@ -395,14 +430,14 @@ script handled — it silently continued and later failed with
 | `vprofile-ec2api-ep-sg` | `sg-01faa4745a8953e2f` |
 
 ### VPC Endpoints
-| Endpoint | ID |
-|---|---|
-| SSM | `vpce-0615acc9dd367d915` |
-| SSM Messages | `vpce-00ae7b1e49d5deed5` |
-| EC2 Messages | `vpce-01766d5b403a3b8f7` |
-| S3 (Gateway) | `vpce-0540d3b05281c8189` |
-| Secrets Manager | `vpce-0ebdbcb485fe2ea67` |
-| EC2 API | `vpce-0a24fd33ba9bbb006` |
+| Endpoint | ID | Status |
+|---|---|---|
+| SSM | `vpce-0615acc9dd367d915` | deleted 2026-09-09 (Phase 5 cleanup) |
+| SSM Messages | `vpce-00ae7b1e49d5deed5` | deleted 2026-09-09 (Phase 5 cleanup) |
+| EC2 Messages | `vpce-01766d5b403a3b8f7` | deleted 2026-09-09 (Phase 5 cleanup) |
+| S3 (Gateway) | `vpce-0540d3b05281c8189` | active — free, route-table based, not deleted |
+| Secrets Manager | `vpce-0ebdbcb485fe2ea67` | deleted 2026-09-09 (Phase 5 cleanup) |
+| EC2 API | `vpce-0a24fd33ba9bbb006` | deleted 2026-09-09 (Phase 5 cleanup) |
 
 ### IAM Roles / Instance Profiles
 | Role | Instance Profile |
@@ -417,7 +452,7 @@ script handled — it silently continued and later failed with
 |---|---|
 | S3 bucket | `vprofile-artifacts-747336059892` |
 | Base AMI | `ami-081b0a6eac00b4f53` |
-| Golden AMI (RabbitMQ v3, superseded) | `ami-0bae99fa0907e01c5` — superseded/unused |
+| Golden AMI (RabbitMQ v3, superseded) | `ami-0bae99fa0907e01c5` — deregistered 2026-09-09; backing snapshot `snap-00241076b1f543e59` deleted (Phase 5 cleanup) |
 | Golden AMI (RabbitMQ v4, node-name pinned) | `ami-041192a7315e5625c` — available, in use |
 
 ### Secrets
@@ -427,11 +462,11 @@ script handled — it silently continued and later failed with
 | RMQ test password | `arn:aws:secretsmanager:us-east-1:747336059892:secret:vprofile/rmq/test-password-onPKEB` |
 
 ### Load Balancing
-| Resource | ARN / Value |
-|---|---|
-| Target group (`vprofile-app-tg`) | `arn:aws:elasticloadbalancing:us-east-1:747336059892:targetgroup/vprofile-app-tg/810a9f8873f9910b` |
-| ALB (`vprofile-alb`) | `arn:aws:elasticloadbalancing:us-east-1:747336059892:loadbalancer/app/vprofile-alb/0be0c8202f2798af` |
-| ALB DNS name | `vprofile-alb-932338318.us-east-1.elb.amazonaws.com` |
+| Resource | ARN / Value | Status |
+|---|---|---|
+| Target group (`vprofile-app-tg`) | `arn:aws:elasticloadbalancing:us-east-1:747336059892:targetgroup/vprofile-app-tg/810a9f8873f9910b` | deleted 2026-09-09 (Phase 5 cleanup) |
+| ALB (`vprofile-alb`) | `arn:aws:elasticloadbalancing:us-east-1:747336059892:loadbalancer/app/vprofile-alb/0be0c8202f2798af` | deleted 2026-09-09 (Phase 5 cleanup) |
+| ALB DNS name (historical, no longer resolves) | `vprofile-alb-932338318.us-east-1.elb.amazonaws.com` | n/a — ALB deleted |
 
 ### EC2 Instances (current state)
 | Instance | Instance ID | Status |
@@ -521,22 +556,18 @@ script handled — it silently continued and later failed with
   of issue as the earlier `file://` userdata problem — a third documented Git-Bash-on-Windows gotcha.
 
 ## Next Step
-1. Verify the correct outer portfolio repo (`~/aws-lift-and-shift`) state: confirm `docs/incidents.md`
-   and `docs/decisions.md` exist and are committed (`git -C ~/aws-lift-and-shift status`,
-   `git -C ~/aws-lift-and-shift log --oneline -5`, and `ls ~/aws-lift-and-shift/docs/`).
-2. Continue Phase 5 architecture documentation using the agreed two-diagram approach: network/security
-   architecture and request-flow/application architecture (Mermaid). Verify the diagrams render cleanly
-   before committing them.
-3. Build the Course Coverage Matrix after the architecture documentation, then complete the README last.
-4. The four EC2 instances are now confirmed `stopped`. ALB (`vprofile-alb`) was left active/billing
-   this session — no change made. Revisit deletion after the Phase 5 documentation is complete
-   (approval-gated, destructive-ish action).
+1. Write the README last, synthesizing `docs/incidents.md`, `docs/decisions.md`,
+   `docs/architecture.md`, and `docs/course-coverage.md` rather than duplicating their content.
+   This is the final Phase 5 deliverable and, once done, the Definition of Done for this project.
+2. All billable resources beyond the stopped EC2 instances and the two Secrets Manager secrets
+   have been deleted — see "Cleanup" above. No further cost-control action needed unless the
+   project is resumed for a live demo.
 
 ## Remaining Phases
 - Phase 3: Tomcat EC2 — COMPLETE. `vprofile-app` verified serving the app on port 8080.
 - Phase 4: Application Load Balancer and target group — COMPLETE. `vprofile-alb` verified
   serving the app end-to-end.
-- Phase 5: End-to-end validation, documentation, and cleanup — IN PROGRESS.
+- Phase 5: End-to-end validation, documentation, and cleanup — IN PROGRESS (only README remaining).
 
 ## Notes
 See `NOTES.md` for chronological study notes and session checkpoints.
